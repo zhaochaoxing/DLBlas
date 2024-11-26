@@ -20,7 +20,8 @@
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import torch
-
+import torch_mlu
+import torch_mlu.utils.gpu_migration
 import triton
 import triton.language as tl
 
@@ -142,7 +143,7 @@ def grouped_matmul_kernel(
 
 
 def group_gemm_fn(group_A, group_B):
-    device = torch.device("cuda")
+    device = torch.device("mlu")
     assert len(group_A) == len(group_B)
     group_size = len(group_A)
 
@@ -164,6 +165,7 @@ def group_gemm_fn(group_A, group_B):
         B_addrs.append(B.data_ptr())
         C_addrs.append(C.data_ptr())
         g_sizes += [M, N, K]
+        # import ipdb; ipdb.set_trace()
         g_lds += [A.stride(0), B.stride(0), C.stride(0)]
 
     # note these are device tensors
@@ -199,14 +201,16 @@ def test():
         M = group_m[i]
         N = group_n[i]
         K = group_k[i]
-        A = torch.rand((M, K), device="cuda", dtype=torch.float16)
-        B = torch.rand((K, N), device="cuda", dtype=torch.float16)
+        A = torch.rand((M, K), device="mlu", dtype=torch.float16)
+        B = torch.rand((K, N), device="mlu", dtype=torch.float16)
         group_A.append(A)
         group_B.append(B)
 
     tri_out = group_gemm_fn(group_A, group_B)
     ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
     for i in range(group_size):
+        # break
+        # import ipdb; ipdb.set_trace();
         assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0)
 
     # only launch the kernel, no tensor preparation here to remove all overhead
@@ -235,9 +239,9 @@ def test():
             line_arg="provider",
             # argument name whose value corresponds to a different line in the plot
             # possible values for `line_arg``
-            line_vals=["cublas", "triton"],
+            line_vals=["torch", "triton"],
             # label name for the lines
-            line_names=["cuBLAS", "Triton"],
+            line_names=["Pytorch", "Triton"],
             # line styles
             styles=[("green", "-"), ("blue", "-")],
             ylabel="runtime(ms)",  # label name for the y-axis
@@ -257,9 +261,9 @@ def test():
         g_lds = []
         group_C = []
         for i in range(group_size):
-            A = torch.rand((N, N), device="cuda", dtype=torch.float16)
-            B = torch.rand((N, N), device="cuda", dtype=torch.float16)
-            C = torch.empty((N, N), device="cuda", dtype=torch.float16)
+            A = torch.rand((N, N), device="mlu", dtype=torch.float16)
+            B = torch.rand((N, N), device="mlu", dtype=torch.float16)
+            C = torch.empty((N, N), device="mlu", dtype=torch.float16)
             group_A.append(A)
             group_B.append(B)
             group_C.append(C)
@@ -269,14 +273,14 @@ def test():
             g_sizes += [N, N, N]
             g_lds += [N, N, N]
 
-        d_a_ptrs = torch.tensor(A_addrs, device="cuda")
-        d_b_ptrs = torch.tensor(B_addrs, device="cuda")
-        d_c_ptrs = torch.tensor(C_addrs, device="cuda")
-        d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device="cuda")
-        d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device="cuda")
+        d_a_ptrs = torch.tensor(A_addrs, device="mlu")
+        d_b_ptrs = torch.tensor(B_addrs, device="mlu")
+        d_c_ptrs = torch.tensor(C_addrs, device="mlu")
+        d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device="mlu")
+        d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device="mlu")
 
         quantiles = [0.5, 0.2, 0.8]
-        if provider == "cublas":
+        if provider == "torch":
             ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: torch_perf_fn(group_A, group_B), quantiles=quantiles
             )
@@ -290,3 +294,6 @@ def test():
         return ms, max_ms, min_ms
 
     benchmark.run(show_plots=True, print_data=True)
+    
+if __name__ == "__main__" :
+    test()

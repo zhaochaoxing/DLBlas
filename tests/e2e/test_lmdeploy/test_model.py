@@ -66,7 +66,7 @@ def run_pipeline_chat_test(
     device_type,
 ):
     tp = 1
-    hf_path = "/nvme/share_data/models/internlm2-chat-7b/"
+    hf_path = '/data/models/Qwen/Qwen-7B-Chat'
     # hf_path = "/workspace/volume/shangda/share/llm_models/Shanghai_AI_Laboratory/internlm2-chat-7b/"  # done
     # hf_path = '/workspace/volume/shangda/share/llm_models/Shanghai_AI_Laboratory/internlm2_5-7b/'
     # hf_path = "/workspace/volume/shangda/share/llm_models/Qwen/Qwen2-7B/"  # done

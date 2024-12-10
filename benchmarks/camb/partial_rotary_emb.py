@@ -227,6 +227,7 @@ def rotary_bwd(q_pe, do_q, cos, sin):
     dx_q = torch.concat((q, add_1), dim=-1)
     return dx_q
 
+from test_utils import test_latency_and_output, check_output
 
 def test():
     num_heads = 128
@@ -281,23 +282,33 @@ def test():
     )
     loss_test = torch.sum(torch.mean(out_q_test) * torch.mean(out_kv_test))
     loss_test.backward(retain_graph=True)
-    assert torch.allclose(q.grad, q_test.grad)
-    assert torch.allclose(k_pe.grad, k_pe_test.grad)
-    assert torch.allclose(kv.grad, kv_test.grad)
+    # assert torch.allclose(q.grad, q_test.grad)
+    # assert torch.allclose(k_pe.grad, k_pe_test.grad)
+    # assert torch.allclose(kv.grad, kv_test.grad)
+    check_output(q.grad, q_test.grad)
+    check_output(k_pe.grad, k_pe_test.grad)
+    check_output(kv.grad, kv_test.grad)
+    
     from dlblas.kernels.camb.partial_rotary_emb import PartialRotaryEmb
     out_tri_q, out_tri_kv = PartialRotaryEmb.apply(q_tri, k_pe_tri, kv_tri, cos, sin)
     print(f"out_q max diff: {(out_q - out_tri_q).abs().max().item()}")
     print(f"out_kv max diff: {(out_kv - out_tri_kv).abs().max().item()}")
-    assert torch.allclose(out_q, out_tri_q)
-    assert torch.allclose(out_kv, out_tri_kv)
+    # assert torch.allclose(out_q, out_tri_q)
+    # assert torch.allclose(out_kv, out_tri_kv)
+    check_output(out_q, out_tri_q)
+    check_output(out_kv, out_tri_kv)
     loss_tri = torch.sum(torch.mean(out_tri_q) * torch.mean(out_tri_kv))
     loss_tri.backward(retain_graph=True)
     print(f"q grad max diff: {(q.grad - q_tri.grad).abs().max().item()}")
     print(f"k_pe grad max diff: {(k_pe.grad - k_pe_tri.grad).abs().max().item()}")
     print(f"kv grad max diff: {(kv.grad - kv_tri.grad).abs().max().item()}")
-    assert torch.allclose(q.grad, q_tri.grad)
-    assert torch.allclose(k_pe.grad, k_pe_tri.grad)
-    assert torch.allclose(kv.grad, kv_tri.grad)
+    # assert torch.allclose(q.grad, q_tri.grad)
+    # assert torch.allclose(k_pe.grad, k_pe_tri.grad)
+    # assert torch.allclose(kv.grad, kv_tri.grad)
+    check_output(q.grad, q_tri.grad)
+    check_output(k_pe.grad, k_pe_tri.grad)
+    check_output(kv.grad, kv_tri.grad)
+    
     if False:
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],

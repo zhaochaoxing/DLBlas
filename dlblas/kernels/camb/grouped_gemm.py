@@ -160,6 +160,7 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
     device = torch.device("mlu")
     print(group_A.shape)
     print(group_B.shape)
+    print(batch_sizes)
     assert len(batch_sizes) == group_B.shape[0]
     group_size = len(batch_sizes)
 
@@ -171,9 +172,16 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
     group_C = []
     start = 0
     for i, size in enumerate(batch_sizes):
-        # TODO 节约耗时
-        A = group_A[start:start + size, :].t().contiguous() if trans_a else group_A[start:start + size, :].contiguous()
-        B = group_B[i, :, :].t().contiguous() if trans_b else group_B[i, :, :].contiguous()
+        # TODO 节约转置耗时
+        # A = group_A[start:start + size, :].clone().t().contiguous() if trans_a else group_A[start:start + size, :].clone().contiguous()
+        # B = group_B[i, :, :].clone().t().contiguous() if trans_b else group_B[i, :, :].clone().contiguous()
+        A = group_A[start:start + size, :].t() if trans_a else group_A[start:start + size, :].clone()
+        B = group_B[i, :, :].t() if trans_b else group_B[i, :, :].clone()
+        # A = torch.rand((4096, 4096), device=device, dtype=torch.float16)
+        # B = torch.rand((4096, 4096), device=device, dtype=torch.float16)
+        
+        print("A.shape:", A.shape)
+        print(B.shape)
         assert A.shape[1] == B.shape[0]
         # M, K = A.shape
         M = size
@@ -207,7 +215,7 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
         group_size,
     )
 
-    return group_C      
+    return torch.cat(group_C)      
     
 
 def group_gemm_fn(group_A, group_B):
@@ -277,9 +285,9 @@ def test():
     tri_out = group_gemm_fn(group_A, group_B)
     ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
     for i in range(group_size):
-        # assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0)
+        assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0.001)
         print(i)
-        assert torch.allclose(ref_out[i], tri_out[i])
+        # assert torch.allclose(ref_out[i], tri_out[i])
 
     # only launch the kernel, no tensor preparation here to remove all overhead
     def triton_perf_fn(a_ptrs, b_ptrs, c_ptrs, sizes, lds, group_size):

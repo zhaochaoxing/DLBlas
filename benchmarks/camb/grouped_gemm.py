@@ -173,8 +173,9 @@ def gmm_op(a, b, batch_sizes, trans_b=False):
 #     check_output(batch_group_B.grad, batch_group_B_test.grad)
 
 def main():
-    # grouped_gemm.test()
-    
+    grouped_gemm.test()
+    return 
+
     args = parse_args()
     # z = args.z
     z = 2
@@ -195,7 +196,7 @@ def main():
 
     out = gmm_op(a, b, batch_sizes, trans_b)
     expected_out = gmm(a_ref, b_ref, batch_sizes, trans_b)
-    check_output(out, expected_out)
+    check_output(out, expected_out.to("mlu"))
 
     # Check gradients.
     out.sum().backward()

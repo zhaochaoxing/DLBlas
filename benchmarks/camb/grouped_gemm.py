@@ -79,6 +79,10 @@ def gmm(a, b, batch_sizes, trans_b=False):
     for i, size in enumerate(batch_sizes):
         rhs = b[i, :, :].t() if trans_b else b[i, :, :]
         out.append(a[start:start + size, :] @ rhs)
+        # if(i == 0):
+        #     print("AB_ops_ref:")
+        #     print(a[start:start + size, :])
+        #     print(rhs)
         start += size
     return torch.cat(out)
 
@@ -98,11 +102,17 @@ class GroupedGemm(torch.autograd.Function):
 
         agrad = None
         if ctx.needs_input_grad[0]:
+            print("agrad:")
+            print(grad.shape)
+            print(b.shape)
             agrad = grouped_gemm.group_gemm_batch(grad, b, batch_sizes, trans_a=False, trans_b=not trans_b)
 
         bgrad = None
         if ctx.needs_input_grad[1]:
-            lhs, rhs = (grad, a) if not trans_b else (a, grad)
+            lhs, rhs = (grad, a) if trans_b else (a, grad)
+            print("bgrad:")
+            print(lhs.shape)
+            print(rhs.shape)
             bgrad = grouped_gemm.group_gemm_batch(lhs, rhs, batch_sizes, trans_a=True, trans_b=False)
 
         return agrad, bgrad, None, None
@@ -173,20 +183,20 @@ def gmm_op(a, b, batch_sizes, trans_b=False):
 #     check_output(batch_group_B.grad, batch_group_B_test.grad)
 
 def main():
-    grouped_gemm.test()
-    return 
+    # grouped_gemm.test()
+    # return 
 
     args = parse_args()
     # z = args.z
-    z = 2
-    m = 4096
-    k = 4096
-    n = 4096
+    z = 3
+    m = 1024
+    k = 1024
+    n = 1024
     trans_b = False
-    
+    device = "mlu"
     torch.manual_seed(0)
-    a = torch.randn(z, m, k).view(-1, k)
-    b = torch.randn(z, n, k) if trans_b else torch.randn(z, k, n)
+    a = torch.randn(z, m, k, dtype=torch.float16, device=device).view(-1, k)
+    b = torch.randn(z, n, k, dtype=torch.float16, device=device) if trans_b else torch.randn(z, k, n, dtype=torch.float16, device=device)
     batch_sizes = torch.tensor([m] * z)
 
     a.requires_grad_(True)
@@ -196,13 +206,19 @@ def main():
 
     out = gmm_op(a, b, batch_sizes, trans_b)
     expected_out = gmm(a_ref, b_ref, batch_sizes, trans_b)
-    check_output(out, expected_out.to("mlu"))
 
+    # check_output(out, expected_out, reduce_dim=k)
+    assert torch.allclose(out, expected_out, atol=1e-2, rtol=0.001)
+    # assert torch.allclose(out[8192:, :], expected_out[8192:, :], atol=1e-2, rtol=0.001)
+    # assert torch.allclose(out[4096:, :], expected_out[4096:, :], atol=1e-2, rtol=0.001)
+    
     # Check gradients.
     out.sum().backward()
     expected_out.sum().backward()
     check_output(a.grad, a_ref.grad)
     check_output(b.grad, b_ref.grad)
+    assert torch.allclose(a.grad, a_ref.grad, atol=1e-2, rtol=0.001)
+    assert torch.allclose(b.grad, b_ref.grad, atol=1e-2, rtol=0.001)
         
 if __name__ == '__main__':
     main()

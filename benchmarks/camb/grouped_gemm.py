@@ -29,46 +29,6 @@ def parse_args():
 def is_cuda():
     return torch.cuda.is_available()
 
-# class GroupedGemm_ref(torch.autograd.Function):
-    
-#     def group_gemm_batch_ref(batch_group_A, batch_gourp_B, batch_sizes, trans_a = False, trans_b = False):
-#         batch_group_C = []
-#         batch_size = len(batch_sizes)
-#         for i in range(batch_size):
-#             groupA = batch_group_A[i]
-#             groupB = batch_gourp_B[i]
-#             if trans_a:
-#                 groupA = groupA.transpose(-2, -1)
-#             if trans_b:
-#                 groupB = groupB.transpose(-2, -1)
-#             groupC = torch.bmm(groupA, groupB)
-#             batch_group_C += groupC
-#         return batch_group_C
-
-#     @staticmethod
-#     def forward(ctx, a, b, batch_sizes, trans_b):
-#         assert torch.count_nonzero(batch_sizes) != 0, "Input batch_size should not be all zeros!"
-#         ctx.save_for_backward(a, b, batch_sizes)
-#         ctx.trans_b = trans_b
-#         return group_gemm_batch_ref(a, b, batch_sizes, trans_a=False, trans_b = trans_b)
-
-#     @staticmethod
-#     def backward(ctx, grad):
-#         grad = grad.contiguous()
-#         a, b, batch_sizes = ctx.saved_tensors
-#         trans_b = ctx.trans_b
-
-#         agrad = None
-#         if ctx.needs_input_grad[0]:
-#             agrad = group_gemm_batch_ref(grad, b, batch_sizes, trans_a=False, trans_b=not trans_b)
-
-#         bgrad = None
-#         if ctx.needs_input_grad[1]:
-#             lhs, rhs = (grad, a) if not trans_b else (a, grad)
-#             bgrad = group_gemm_batch_ref(lhs, rhs, batch_sizes, trans_a=True, trans_b=False)
-
-#         return agrad, bgrad, None, None 
-
 # a [z*m, k]   b [z,n,k]
 # batch_sizes = torch.tensor([m] * z)
 def gmm(a, b, batch_sizes, trans_b=False):
@@ -79,10 +39,6 @@ def gmm(a, b, batch_sizes, trans_b=False):
     for i, size in enumerate(batch_sizes):
         rhs = b[i, :, :].t() if trans_b else b[i, :, :]
         out.append(a[start:start + size, :] @ rhs)
-        # if(i == 0):
-        #     print("AB_ops_ref:")
-        #     print(a[start:start + size, :])
-        #     print(rhs)
         start += size
     return torch.cat(out)
 
@@ -102,17 +58,17 @@ class GroupedGemm(torch.autograd.Function):
 
         agrad = None
         if ctx.needs_input_grad[0]:
-            print("agrad:")
-            print(grad.shape)
-            print(b.shape)
+            #print("agrad:")
+            #print(grad.shape)
+            #print(b.shape)
             agrad = grouped_gemm.group_gemm_batch(grad, b, batch_sizes, trans_a=False, trans_b=not trans_b)
 
         bgrad = None
         if ctx.needs_input_grad[1]:
             lhs, rhs = (grad, a) if trans_b else (a, grad)
-            print("bgrad:")
-            print(lhs.shape)
-            print(rhs.shape)
+            #print("bgrad:")
+            #print(lhs.shape)
+            #print(rhs.shape)
             bgrad = grouped_gemm.group_gemm_batch(lhs, rhs, batch_sizes, trans_a=True, trans_b=False)
 
         return agrad, bgrad, None, None
@@ -219,6 +175,54 @@ def main():
     check_output(b.grad, b_ref.grad)
     assert torch.allclose(a.grad, a_ref.grad, atol=1e-2, rtol=0.001)
     assert torch.allclose(b.grad, b_ref.grad, atol=1e-2, rtol=0.001)
-        
+    device_ = "mlu"
+
+
+    configs = []
+    configs.append(
+        triton.testing.Benchmark(
+            x_names=["op"],
+            x_vals=["fwd", "bwd"],
+            line_arg="provider",
+            line_vals=["triton", "pytorch"],
+            line_names=["Triton", "PyTorch"],
+            ylabel="ms",
+            plot_name=f"grouped gemm(z={z})",
+            args={"z": z},
+        )
+    )
+
+    @triton.testing.perf_report(configs)
+    def bench_fn(z, op, provider, device=device_):
+        warmup = 100
+        rep = 200
+
+        if "triton" in provider:
+            if "fwd" == op:
+                fn = lambda: GroupedGemm.apply(
+                    a, b, batch_sizes, trans_b
+                )
+            elif "bwd" == op:
+                c_triton = GroupedGemm.apply(
+                    a, b, batch_sizes, trans_b
+                )
+                loss_tri = c_triton.sum()
+                fn = lambda: loss_tri.backward(retain_graph=True)
+            else:
+                raise Exception()
+
+        if "pytorch" in provider:
+            if "fwd" == op:
+                fn = lambda: gmm(a_ref, b_ref, batch_sizes, trans_b)
+            elif "bwd" == op:
+                c = gmm(a_ref, b_ref, batch_sizes, trans_b)
+                loss_torch = c.sum()
+                fn = lambda: loss_torch.backward(retain_graph=True)
+            else:
+                raise Exception()
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        return ms
+    bench_fn.run(show_plots=True, print_data=True)
+    
 if __name__ == '__main__':
     main()

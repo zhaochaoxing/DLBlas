@@ -22,8 +22,7 @@
 import torch
 import torch_mlu
 import triton
-import triton.language as tl
-
+import triton.language as tl        
 
 @triton.autotune(
     configs=[
@@ -104,11 +103,6 @@ def grouped_matmul_kernel(
             a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
             b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
             c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
-            # if g == 2 :
-            #     if count == 0:
-            #         tl.device_print("   g:", g)
-            #         tl.device_print("   c_ptr:", c_ptr)
-            #         count = 1
             # figure out tile coordinates
             tile_idx_in_gemm = tile_idx - last_problem_end
             tile_m_idx = tile_idx_in_gemm // num_n_tiles
@@ -146,116 +140,90 @@ def grouped_matmul_kernel(
         # get ready to go to the next gemm problem
         last_problem_end = last_problem_end + num_tiles
 
-# def group_gemm_batch(batch_group_A, batch_gourp_B, batch_sizes, trans_a = False, trans_b = False):
-#     batch_group_C = []
-#     batch_size = len(batch_sizes)
-#     for i in range(batch_size):
-#         groupA = batch_group_A[i]
-#         groupB = batch_gourp_B[i]
-#         if trans_a:
-#             groupA = groupA.transpose(-2, -1)
-#         if trans_b:
-#             groupB = groupB.transpose(-2, -1)
-#         groupC = group_gemm_fn(groupA, groupB)
-#         batch_group_C += groupC
-#     return batch_group_C
-
-# a [z*m, k]   b [z, k, n]
-# batch_sizes = torch.tensor([m] * z)
-# def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = False):
-#     device = "mlu"
-#     group_B = group_B.view(-1, group_B.shape[-1])
-    
-#     print(len(batch_sizes))
-#     # assert len(batch_sizes) == group_B.shape[0]
-    
-#     group_size = len(batch_sizes)
-#     A_addrs = []
-#     B_addrs = []
-#     C_addrs = []
-#     g_sizes = []
-#     g_lds = []
-#     group_C = []
-#     start = 0
-#     print("group_A:", group_A.data_ptr())
-#     for i, size in enumerate(batch_sizes):
-#         size = int(size)
-#         # TODO 节约转置耗时
-#         A = group_A[start:start + size, :].clone().t().contiguous() if trans_a else group_A[start:start + size, :].clone().contiguous()
-#         B = group_B[start:start + size, :].clone().t().contiguous() if trans_b else group_B[start:start + size, :].clone().contiguous()
-#         # if (start == 0):
-#         #     print("AB_ops:")
-#         #     print(A)
-#         #     print(B)
-#         start += size
-#         # A = torch.rand((4096, 4096), device=device, dtype=torch.float16)
-#         # B = torch.rand((4096, 4096), device=device, dtype=torch.float16)
-#         assert A.shape[1] == B.shape[0]
-#         # M, K = A.shape
-#         M = size
-#         K, N = B.shape
-#         print("M:", M, "N:", N)
-#         C = torch.empty((M, N), device=device, dtype=A.dtype)
-#         group_C.append(C)
-#         A_addrs.append(A.data_ptr())
-#         B_addrs.append(B.data_ptr())
-#         C_addrs.append(C.data_ptr())
-#         print("C.data_ptr():", C.data_ptr())
-#         # print([A.stride(0), B.stride(0), C.stride(0)])
-#         g_sizes += [M, N, K]
-#         g_lds += [A.stride(0), B.stride(0), C.stride(0)]
-
-#     # note these are device tensors
-#     d_a_ptrs = torch.tensor(A_addrs, device=device)
-#     d_b_ptrs = torch.tensor(B_addrs, device=device)
-#     d_c_ptrs = torch.tensor(C_addrs, device=device)
-#     d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
-#     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
-#     print("d_c_ptrs:", d_c_ptrs)
-#     print("d_g_sizes:", d_g_sizes)
-#     print("d_g_lds:", d_g_lds)
-#     print("group_size:", group_size)
-#     print("group_c 0", group_C[0])
-#     # we use a fixed number of CTA, and it's auto-tunable
-#     grid = lambda META: (META["NUM_SM"],)#??
-#     grouped_matmul_kernel[grid](
-#         d_a_ptrs,
-#         d_b_ptrs,
-#         d_c_ptrs,
-#         d_g_sizes,
-#         d_g_lds,
-#         group_size,
-#     )
-#     print("group_c 0", group_C[0])
-#     if trans_a:
-#         print("trans_a:", torch.stack(group_C, dim=0).shape)
-#         return torch.stack(group_C, dim=0)
-#     else:
-#         return torch.cat(group_C, dim=0)      
-    
+# group gemm for A [M, k]   B [z, k, n]   M = sum(group_sizes)  z = len(group_sizes)
+# C[M, n]
 def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = False):
+    # print("group_B shape:", group_B.shape)
     group_B = group_B.view(-1, group_B.shape[-1])
+    device = torch.device("mlu")
     
-    group_A_inter = []
-    group_B_inter = []
+    group_size = len(batch_sizes)
+
+    A_addrs = []
+    B_addrs = []
+    C_addrs = []
+    g_sizes = []
+    g_lds = []
+    group_C = []
+    
+    group_A_tmp = []
     start = 0
+    K = group_A.shape[-1]
+    # print("group_B shape:", group_B.shape)
+    loop_b = int(group_B.shape[0] / group_size)
     for i, size in enumerate(batch_sizes):
         size = int(size)
-        # TODO 节约转置耗时
+        # print(i, " size:", size)
         A = group_A[start:start + size, :].clone().t().contiguous() if trans_a else group_A[start:start + size, :].clone().contiguous()
-        B = group_B[start:start + size, :].clone().t().contiguous() if trans_b else group_B[start:start + size, :].clone().contiguous()
+        if trans_a:
+            B = group_B[start:start + size, :].clone().t().contiguous() if trans_b else group_B[start:start + size, :].clone().contiguous()
+        else:
+            B = group_B[i * loop_b:i * loop_b + loop_b, :].clone().t().contiguous() if trans_b else group_B[i * loop_b:i * loop_b + loop_b, :].clone().contiguous()
+        # print(A)
+        # print(B)
+        # A = torch.rand((4096, 4096), device=device, dtype=torch.float16)
+        # B = torch.rand((4096, 4096), device=device, dtype=torch.float16)
+        group_A_tmp.append(A)
+        group_A_tmp.append(B)
         start += size
+        # print("A.shape:", A.shape)
+        # print("B.shape:", B.shape)
         assert A.shape[1] == B.shape[0]
-        group_A_inter.append(A)
-        group_B_inter.append(B)
-    group_C = group_gemm_fn(group_A_inter, group_B_inter)
 
+        M, K = A.shape
+        K, N = B.shape
+        C = torch.empty((M, N), device=device, dtype=A.dtype)
+        A_addrs.append(A.data_ptr())
+        B_addrs.append(B.data_ptr())
+        C_addrs.append(C.data_ptr())
+        g_sizes += [M, N, K]
+        g_lds += [A.stride(0), B.stride(0), C.stride(0)]
+        
+        group_C.append(C)
+        # print(i, ":", C.data_ptr())
+        
+    # note these are device tensors
+    d_a_ptrs = torch.tensor(A_addrs, device=device)
+    d_b_ptrs = torch.tensor(B_addrs, device=device)
+    d_c_ptrs = torch.tensor(C_addrs, device=device)
+    d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
+    d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
+    
+    # print("d_c_ptrs:", d_c_ptrs)
+    # print("d_g_sizes:", d_g_sizes)
+    # print("d_g_lds:", d_g_lds)
+    # print("group_size:", group_size)
+    # # print("A_addrs[0][0]", A_addrs[0])
+    # print("C_addrs [0]:", C_addrs)
+    # we use a fixed number of CTA, and it's auto-tunable
+    grid = lambda META: (META["NUM_SM"],)#??
+    grouped_matmul_kernel[grid](
+        d_a_ptrs,
+        d_b_ptrs,
+        d_c_ptrs,
+        d_g_sizes,
+        d_g_lds,
+        group_size,
+    )
+    # print("group_c 0", group_C[0])
     if trans_a:
-        print("trans_a:", torch.stack(group_C, dim=0).shape)
+        # print("trans_a:", torch.stack(group_C, dim=0).shape)
         return torch.stack(group_C, dim=0)
     else:
+        # for C in group_C:
+        #     print(C.shape)
         return torch.cat(group_C, dim=0)      
-    
+
 
 def group_gemm_fn(group_A, group_B):
     device = torch.device("mlu")
@@ -351,7 +319,7 @@ def test():
             # argument names to use as an x-axis for the plot
             x_names=["N"],
             x_vals=[
-                2**i for i in range(7, 11)
+                2**i for i in range(7, 13)
             ],  # different possible values for `x_name`
             line_arg="provider",
             # argument name whose value corresponds to a different line in the plot

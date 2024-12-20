@@ -210,7 +210,7 @@ def test():
     ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
     for i in range(group_size):
         # break
-        # import ipdb; ipdb.set_trace();
+        import ipdb; ipdb.set_trace();
         assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0)
 
     # only launch the kernel, no tensor preparation here to remove all overhead

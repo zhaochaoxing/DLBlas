@@ -7,7 +7,7 @@ import triton
 import time
 from torch.profiler import profile, record_function, ProfilerActivity
 import dlblas
-from python.dlBLAS.dlblas.utils.device_utils import get_idle_device
+from dlblas.utils.device_utils import get_idle_device
 
 
 def _capacity(gates: Tensor, capacity_factor: Tensor, min_capacity: Tensor) -> Tensor:
@@ -215,8 +215,9 @@ def fused_topkgating_opt(
     #     return l_aux, combine_weights, dispatch_mask
 
 
-device_ = torch.device(get_idle_device())
-torch.cuda.set_device(device_)
+# device_ = torch.device(get_idle_device())
+device_ = 'mlu'
+# torch.cuda.set_device(device_)
 
 
 def test():

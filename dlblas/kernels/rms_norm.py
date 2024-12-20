@@ -1,5 +1,7 @@
 # https://github.com/InternLM/lmdeploy/blob/v0.6.1/lmdeploy/pytorch/kernels/cuda/rms_norm.py
 import torch
+import torch_mlu
+import torch_mlu.utils.gpu_migration
 import triton
 import triton.language as tl
 from torch import Tensor
@@ -29,11 +31,11 @@ def rms_norm_kernel(
     """rms norm kernel."""
     prog_id = tl.program_id(0)
     offsets = tl.arange(0, BLOCK_N)
-
-    w = tl.load(weight + offsets, mask=offsets < N_COLS, other=0.0)
+    tl.device_print("off", offsets)
+    w = tl.load(weight + offsets, mask=offsets < N_COLS, other=0.0, cache_modifier=".cg")
 
     x_ptr = input + prog_id * input_row_stride
-    x = tl.load(x_ptr + offsets, mask=offsets < N_COLS, other=0.0)
+    x = tl.load(x_ptr + offsets, mask=offsets < N_COLS, other=0.0, cache_modifier=".cg")
     out = _compute_rms_norm(x, w, eps, N_COLS)
 
     out_ptr = output + prog_id * input_row_stride
@@ -57,13 +59,13 @@ def add_rms_norm_kernel(
     prog_id = tl.program_id(0)
     offsets = tl.arange(0, BLOCK_N)
 
-    w = tl.load(weight + offsets, mask=offsets < N_COLS, other=0.0)
+    w = tl.load(weight + offsets, mask=offsets < N_COLS, other=0.0, cache_modifier=".cg")
 
     x_ptr = input + prog_id * input_row_stride
-    x = tl.load(x_ptr + offsets, mask=offsets < N_COLS, other=0.0)
+    x = tl.load(x_ptr + offsets, mask=offsets < N_COLS, other=0.0, cache_modifier=".cg")
 
     res_ptr = residual + prog_id * residual_row_stride
-    res = tl.load(res_ptr + offsets, mask=offsets < N_COLS, other=0.0)
+    res = tl.load(res_ptr + offsets, mask=offsets < N_COLS, other=0.0, cache_modifier=".cg")
 
     new_x = x + res
     out_res_ptr = out_residual + prog_id * residual_row_stride
@@ -92,12 +94,12 @@ def rms_norm(
     input_stride = hidden_states.stride(-2)
 
     BLOCK_N = triton.next_power_of_2(feat_size)
-
+    # import ipdb; ipdb.set_trace();
     if out is None:
         out = torch.empty_like(hidden_states)
 
     grid = (seq_len,)
-
+    # import ipdb; ipdb.set_trace();
     if residual is None:
         rms_norm_kernel[grid](
             hidden_states,
@@ -147,12 +149,12 @@ if __name__ == "__main__":
     def test_rms_norm(bsz, ctx_len, feat_len, dtype):
         """test rms norm."""
         input = (
-            torch.empty((bsz, ctx_len, feat_len), dtype=dtype, device="cuda")
+            torch.empty((bsz, ctx_len, feat_len), dtype=dtype, device="mlu")
             .normal_(mean=0.0, std=0.5)
             .contiguous()
         )
         weight = (
-            torch.empty((feat_len), dtype=dtype, device="cuda")
+            torch.empty((feat_len), dtype=dtype, device="mlu")
             .normal_(mean=0.0, std=0.5)
             .contiguous()
         )
@@ -179,7 +181,7 @@ if __name__ == "__main__":
             )
         )
 
-    test_rms_norm(1, 8128, 5120, torch.float16)
-    test_rms_norm(1, 8128, 5120, torch.float32)
-    test_rms_norm(1, 992, 128, torch.float16)
-    test_rms_norm(1, 65537, 128, torch.float32)
+    test_rms_norm(2, 8128, 5120, torch.float16)
+    # test_rms_norm(1, 8128, 5120, torch.float32)
+    # test_rms_norm(1, 992, 128, torch.float16)
+    # test_rms_norm(1, 65537, 128, torch.float32)

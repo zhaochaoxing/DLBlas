@@ -64,7 +64,6 @@ def ref_single_query_cached_kv_attention(
             block_offset = j % block_size
 
             k = key_cache[block_number, :, :, block_offset]
-            k = k.reshape(num_kv_heads, head_size)
             keys_lst.append(k)
 
             v = value_cache[block_number, :, :, block_offset]
@@ -295,10 +294,10 @@ def test_paged_attention(
 
 def test():
     dtype = torch.float16
-    feat_dim = 16
-    feat_dim_v = 16
-    num_heads_q = 4
-    num_heads_k = 2
+    feat_dim = 96
+    feat_dim_v = 64
+    num_heads_q = 16
+    num_heads_k = 4
     seq_lens = torch.tensor([1], device="cuda")
     start_loc = _start_loc(seq_lens)
     block_size = 16
@@ -329,6 +328,7 @@ def test():
     blocked_k, blocked_v = blocked_kv
 
     out = conti_q.new_empty(*conti_q.shape[:-1], feat_dim_v)
+
     
     paged_decode_attention_fwd(
         conti_q,
@@ -341,7 +341,7 @@ def test():
         max_seqlen=max_seq_len,
     )
 
-    ref_output = torch.empty_like(conti_q)
+    ref_output = conti_q.new_empty(*conti_q.shape[:-1], feat_dim_v)
     num_queries_per_kv = num_heads_q // num_heads_k
     scale = float(1.0 / (feat_dim**0.5))
     ref_single_query_cached_kv_attention(

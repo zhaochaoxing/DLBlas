@@ -160,9 +160,6 @@ def _fwd_grouped_split_kernel(
     # load block offset
     # dirty
     start_block_id = loop_start // BLOCK_N
-    if window_size > 0:
-        start_block_id = tl.maximum(history_len - window_size, loop_start) // BLOCK_N
-        kv_min_loc = tl.maximum(history_len - window_size, 0)
 
     loop_start = start_block_id * BLOCK_N
     block_offset_ptrs += start_block_id
@@ -187,11 +184,16 @@ def _fwd_grouped_split_kernel(
             qk = qk / logit_softcapping
             qk = tanh(qk)
             qk = qk * logit_softcapping
+        
+        # print("start_n:", start_n)
+        # print("BLOCK_N:", BLOCK_N)
+        # print("history_len:", history_len)
+        # print("window_size:", window_size)
+        # print("offs_n:", offs_n)
+
         # NOTE: inf - inf = nan, and nan will leads to error
-        if start_n + BLOCK_N > history_len or window_size > 0:
+        if start_n + BLOCK_N > history_len:
             qk_mask = history_len >= (start_n + offs_n)
-            if window_size > 0:
-                qk_mask = qk_mask and ((start_n + offs_n) >= kv_min_loc)
             qk = tl.where(
                 qk_mask[None, :],
                 qk,
@@ -334,7 +336,7 @@ def paged_decode_attention_fwd(
         max_seqlen (int): The max input length.
         block_size (int): kv cache block size.
     """
-    
+    # print("seq_lens:", seq_lens)
     global _convert_pv
     if _convert_pv is None:
         nv_cap = torch.cuda.get_device_capability()
@@ -379,6 +381,7 @@ def paged_decode_attention_fwd(
         SPLIT_K = 4
         acc = q.new_empty(batch, head, SPLIT_K, Lv + 2, dtype=torch.float32)
         BLOCK_DMODEL, BLOCK_DMODEL1, BLOCK_DV = _get_block_d(Lk)
+
         p2_kv_group_num = triton.next_power_of_2(kv_group_num)
         BLOCK_H = max(16, min(BLOCK, p2_kv_group_num))
         grid_1 = triton.cdiv(head, min(BLOCK_H, kv_group_num))

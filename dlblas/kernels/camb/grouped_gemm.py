@@ -22,7 +22,8 @@
 import torch
 import torch_mlu
 import triton
-import triton.language as tl        
+import triton.language as tl
+import time        
 
 @triton.autotune(
     configs=[
@@ -111,6 +112,8 @@ def grouped_matmul_kernel(
             # do regular gemm here
             offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
             offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            offs_am = offs_am % gm
+            offs_bn = offs_bn % gn
             offs_k = tl.arange(0, BLOCK_SIZE_K)
             a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
             b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
@@ -120,6 +123,12 @@ def grouped_matmul_kernel(
                 tl.multiple_of(a_ptrs, [16, 16])
                 tl.multiple_of(b_ptrs, [16, 16])
                 # assume full tile for now
+                # a = tl.load(a_ptrs, mask=offs_k[:, None] < k - kk * BLOCK_SIZE_K,
+                #     other=0.0,
+                #     cache_modifier=".cg")
+                # b = tl.load(b_ptrs, mask=offs_k[:, None] < k - kk * BLOCK_SIZE_K,
+                #     other=0.0,
+                #     cache_modifier=".cg")
                 a = tl.load(a_ptrs)
                 b = tl.load(b_ptrs)
                 accumulator += tl.dot(a, b)
@@ -140,13 +149,256 @@ def grouped_matmul_kernel(
         # get ready to go to the next gemm problem
         last_problem_end = last_problem_end + num_tiles
 
-# group gemm for A [M, k]   B [z, k, n]   M = sum(group_sizes)  z = len(group_sizes)
-# C[M, n]
-def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = False):
-    # print("group_B shape:", group_B.shape)
-    group_B = group_B.view(-1, group_B.shape[-1])
+
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 128,
+                "BLOCK_SIZE_N": 128,
+                "BLOCK_SIZE_K": 32,
+                "NUM_SM": 84,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 128,
+                "BLOCK_SIZE_N": 128,
+                "BLOCK_SIZE_K": 32,
+                "NUM_SM": 128,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 64,
+                "BLOCK_SIZE_N": 64,
+                "BLOCK_SIZE_K": 32,
+                "NUM_SM": 84,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": 64,
+                "BLOCK_SIZE_N": 64,
+                "BLOCK_SIZE_K": 32,
+                "NUM_SM": 128,
+            }
+        ),
+    ],
+    key=["group_size"],  #??
+)
+@triton.jit
+def grouped_matmul_kernel_v2(
+    # device tensor of matrices pointers
+    group_a_ptrs,
+    group_b_ptrs,
+    group_c_ptrs,
+    # device tensor of gemm sizes. its shape is [group_size, 3]
+    # dim 0 is group_size, dim 1 is the values of <M, N, K> of each gemm
+    group_gemm_sizes,
+    # device tensor of leading dimension sizes. its shape is [group_size, 3]
+    # dim 0 is group_size, dim 1 is the values of <lda, ldb, ldc> of each gemm
+    g_lds,
+    # number of gemms
+    group_size,
+    # number of virtual SM
+    NUM_SM: tl.constexpr,
+    # tile sizes
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+):
+    tile_idx = tl.program_id(0)
+    last_problem_end = 0
+    count = 0
+    for g in range(group_size):
+        # get the gemm size of the current problem
+        gm = tl.load(group_gemm_sizes + g * 3)
+        gn = tl.load(group_gemm_sizes + g * 3 + 1)
+        gk = tl.load(group_gemm_sizes + g * 3 + 2)
+        num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
+        num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
+        num_tiles = num_m_tiles * num_n_tiles
+        # iterate through the tiles in the current gemm problem
+        while tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles:
+            # pick up a tile from the current gemm problem
+            k = gk
+            lda = tl.load(g_lds + g * 3)
+            ldb = tl.load(g_lds + g * 3 + 1)
+            ldc = tl.load(g_lds + g * 3 + 2)
+            a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
+            b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
+            c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
+            # figure out tile coordinates
+            tile_idx_in_gemm = tile_idx - last_problem_end
+            tile_m_idx = tile_idx_in_gemm // num_n_tiles
+            tile_n_idx = tile_idx_in_gemm % num_n_tiles
+
+            # do regular gemm here
+            offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            offs_am = offs_am % gm
+            offs_bn = offs_bn % gn
+            offs_k = tl.arange(0, BLOCK_SIZE_K)
+            a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
+            b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
+            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+            for kk in range(0, tl.cdiv(k, BLOCK_SIZE_K)):
+                # hint to Triton compiler to do proper loop pipelining
+                tl.multiple_of(a_ptrs, [16, 16])
+                tl.multiple_of(b_ptrs, [16, 16])
+                a = tl.load(a_ptrs)
+                b = tl.load(b_ptrs)
+                accumulator += tl.dot(a, b)
+                a_ptrs += BLOCK_SIZE_K
+                b_ptrs += BLOCK_SIZE_K * ldb
+            c = accumulator.to(tl.float16)
+
+            offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
+
+            # assumes full tile for now
+            tl.store(c_ptrs, c)
+
+            # go to the next tile by advancing NUM_SM
+            tile_idx += NUM_SM
+
+        # get ready to go to the next gemm problem
+        last_problem_end = last_problem_end + num_tiles
+
+
+# @triton.autotune(
+#     configs=[
+#         triton.Config(
+#             {
+#                 "BLOCK_SIZE_M": 128,
+#                 "BLOCK_SIZE_N": 128,
+#                 "BLOCK_SIZE_K": 32,
+#                 "GROUP_SIZE_M": 8,
+#                 "NUM_SM": 84,
+#             }
+#         ),
+#         triton.Config(
+#             {
+#                 "BLOCK_SIZE_M": 128,
+#                 "BLOCK_SIZE_N": 128,
+#                 "BLOCK_SIZE_K": 32,
+#                 "GROUP_SIZE_M": 8,
+#                 "NUM_SM": 128,
+#             }
+#         ),
+#         triton.Config(
+#             {
+#                 "BLOCK_SIZE_M": 64,
+#                 "BLOCK_SIZE_N": 64,
+#                 "BLOCK_SIZE_K": 32,
+#                 "GROUP_SIZE_M": 8,
+#                 "NUM_SM": 84,
+#             }
+#         ),
+#         triton.Config(
+#             {
+#                 "BLOCK_SIZE_M": 64,
+#                 "BLOCK_SIZE_N": 64,
+#                 "BLOCK_SIZE_K": 32,
+#                 "GROUP_SIZE_M": 8,
+#                 "NUM_SM": 128,
+#             }
+#         ),
+#     ],
+#     key=["group_size"],  
+# )
+# @triton.jit
+# def grouped_matmul_kernel_v3(
+#     # device tensor of matrices pointers
+#     group_a_ptrs,
+#     group_b_ptrs,
+#     group_c_ptrs,
+#     # device tensor of gemm sizes. its shape is [group_size, 3]
+#     # dim 0 is group_size, dim 1 is the values of <M, N, K> of each gemm
+#     group_gemm_sizes,
+#     # device tensor of leading dimension sizes. its shape is [group_size, 3]
+#     # dim 0 is group_size, dim 1 is the values of <lda, ldb, ldc> of each gemm
+#     g_lds,
+#     # number of gemms
+#     group_size,
+#     # number of virtual SM
+#     NUM_SM: tl.constexpr,
+#     # tile sizes
+#     BLOCK_SIZE_M: tl.constexpr,
+#     BLOCK_SIZE_N: tl.constexpr,
+#     BLOCK_SIZE_K: tl.constexpr,
+#     GROUP_SIZE_M: tl.constexpr,
+# ):
+#     tile_idx = tl.program_id(0)
+#     last_problem_end = 0
+#     count = 0
+#     for g in range(group_size):
+#         # get the gemm size of the current problem
+#         gm = tl.load(group_gemm_sizes + g * 3)
+#         gn = tl.load(group_gemm_sizes + g * 3 + 1)
+#         gk = tl.load(group_gemm_sizes + g * 3 + 2)
+#         num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
+#         num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
+#         num_pid_in_group = GROUP_SIZE_M * num_n_tiles
+#         num_tiles = num_m_tiles * num_n_tiles
+#         # iterate through the tiles in the current gemm problem
+#         while tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles:
+#             # pick up a tile from the current gemm problem
+#             k = gk
+#             lda = tl.load(g_lds + g * 3)
+#             ldb = tl.load(g_lds + g * 3 + 1)
+#             ldc = tl.load(g_lds + g * 3 + 2)
+#             a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
+#             b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
+#             c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
+#             # figure out tile coordinates
+#             group_id = tile_idx // num_pid_in_group
+#             first_pid_m = group_id * GROUP_SIZE_M
+#             # 边界处理
+#             group_size_m = min(num_m_tiles - first_pid_m, GROUP_SIZE_M)
+#             tile_m_idx = first_pid_m + (tile_idx % group_size_m)
+#             tile_n_idx = (tile_idx % num_pid_in_group) // group_size_m
+
+#             # do regular gemm here
+#             offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+#             offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+#             offs_am = offs_am % gm
+#             offs_bn = offs_bn % gn
+#             offs_k = tl.arange(0, BLOCK_SIZE_K)
+#             a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
+#             b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
+#             accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+#             for kk in range(0, tl.cdiv(k, BLOCK_SIZE_K)):
+#                 # hint to Triton compiler to do proper loop pipelining
+#                 tl.multiple_of(a_ptrs, [16, 16])
+#                 tl.multiple_of(b_ptrs, [16, 16])
+#                 # assume full tile for now
+#                 a = tl.load(a_ptrs)
+#                 b = tl.load(b_ptrs)
+#                 accumulator += tl.dot(a, b)
+#                 a_ptrs += BLOCK_SIZE_K
+#                 b_ptrs += BLOCK_SIZE_K * ldb
+#             c = accumulator.to(tl.float16)
+
+#             offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+#             offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+#             c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
+
+#             # assumes full tile for now
+#             tl.store(c_ptrs, c)
+
+#             # go to the next tile by advancing NUM_SM
+#             tile_idx += NUM_SM
+
+#         # get ready to go to the next gemm problem
+#         last_problem_end = last_problem_end + num_tiles
+
+# group gemm for A [M, n]   B [M, k]   M = sum(group_sizes)  z = len(group_sizes)
+# C[z, n, k] = A^T @ B
+def group_gemm_transA(group_A, group_B, batch_sizes, trans_b = False):
     device = torch.device("mlu")
-    
     group_size = len(batch_sizes)
 
     A_addrs = []
@@ -159,20 +411,11 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
     group_A_tmp = []
     start = 0
     K = group_A.shape[-1]
-    # print("group_B shape:", group_B.shape)
-    loop_b = int(group_B.shape[0] / group_size)
     for i, size in enumerate(batch_sizes):
         size = int(size)
-        # print(i, " size:", size)
-        A = group_A[start:start + size, :].clone().t().contiguous() if trans_a else group_A[start:start + size, :].clone().contiguous()
-        if trans_a:
-            B = group_B[start:start + size, :].clone().t().contiguous() if trans_b else group_B[start:start + size, :].clone().contiguous()
-        else:
-            B = group_B[i * loop_b:i * loop_b + loop_b, :].clone().t().contiguous() if trans_b else group_B[i * loop_b:i * loop_b + loop_b, :].clone().contiguous()
-        # print(A)
-        # print(B)
-        # A = torch.rand((4096, 4096), device=device, dtype=torch.float16)
-        # B = torch.rand((4096, 4096), device=device, dtype=torch.float16)
+        A = group_A[start:start + size, :].clone().t().contiguous() 
+        B = group_B[start:start + size, :].clone().t().contiguous() if trans_b else group_B[start:start + size, :].clone().contiguous()
+
         group_A_tmp.append(A)
         group_A_tmp.append(B)
         start += size
@@ -190,7 +433,6 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
         g_lds += [A.stride(0), B.stride(0), C.stride(0)]
         
         group_C.append(C)
-        # print(i, ":", C.data_ptr())
         
     # note these are device tensors
     d_a_ptrs = torch.tensor(A_addrs, device=device)
@@ -199,14 +441,8 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
     d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
     
-    # print("d_c_ptrs:", d_c_ptrs)
-    # print("d_g_sizes:", d_g_sizes)
-    # print("d_g_lds:", d_g_lds)
-    # print("group_size:", group_size)
-    # # print("A_addrs[0][0]", A_addrs[0])
-    # print("C_addrs [0]:", C_addrs)
     # we use a fixed number of CTA, and it's auto-tunable
-    grid = lambda META: (META["NUM_SM"],)#??
+    grid = lambda META: (META["NUM_SM"],)
     grouped_matmul_kernel[grid](
         d_a_ptrs,
         d_b_ptrs,
@@ -215,14 +451,116 @@ def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = F
         d_g_lds,
         group_size,
     )
-    # print("group_c 0", group_C[0])
+
+    return torch.stack(group_C, dim=0)
+ 
+    
+# group gemm for A [M, k]   B [z, k, n]   M = sum(group_sizes)  z = len(group_sizes)
+# C[M, n]
+def group_gemm_batch(group_A, group_B, batch_sizes, trans_a = False, trans_b = False):
     if trans_a:
-        # print("trans_a:", torch.stack(group_C, dim=0).shape)
-        return torch.stack(group_C, dim=0)
-    else:
-        # for C in group_C:
-        #     print(C.shape)
-        return torch.cat(group_C, dim=0)      
+        return group_gemm_transA(group_A, group_B, batch_sizes, trans_b)
+    
+    # print("group_B shape:", group_B.shape)
+    # group_B = group_B.view(-1, group_B.shape[-1])
+    
+    # last_time = time.time()
+    # torch.mlu.synchronize()
+    # cur_time = time.time()
+    # print("copy duration 01:", cur_time- last_time)
+    # last_time = cur_time
+    
+    device = torch.device("mlu")
+    group_size = len(batch_sizes)
+
+    A_addrs = []
+    B_addrs = []
+    C_addrs = []
+    g_sizes = []
+    g_lds = []
+    group_C = []
+    
+    group_A_tmp = []
+    start = 0
+    K = group_A.shape[-1]
+    # print("group_B shape:", group_B.shape)
+    loop_b = int(group_B.shape[0] / group_size)
+    
+    for i, size in enumerate(batch_sizes):
+        size = int(size)
+        # print(i, " size:", size)
+        A = group_A[start:start + size, :].clone().contiguous()
+        B = group_B[i, :, :].clone().squeeze(dim=0).t().contiguous() if trans_b else group_B[i, :, :].clone().squeeze(dim=0).contiguous()
+        
+        group_A_tmp.append(A)
+        group_A_tmp.append(B)
+        
+        # A = torch.empty(group_A[start:start + size, :].shape, device=device, dtype=group_A.dtype)
+        # if not trans_b:
+        #     B = torch.empty(group_B[i * loop_b:i * loop_b + loop_b, :].shape, device=device, dtype=group_A.dtype)
+        # else:
+        #     B = group_B[i * loop_b:i * loop_b + loop_b, :].clone().t().contiguous() 
+        
+        # 去除正向时 创建tensor 的延迟
+        # A = group_A[start:start + size, :]
+        # if not trans_b:
+        #     B = group_B[i * loop_b:i * loop_b + loop_b, :]
+        # else:
+        #     B = group_B[i * loop_b:i * loop_b + loop_b, :].clone().t().contiguous() 
+        # print(A)
+        # print(B)
+        
+
+        start += size
+        # print("A.shape:", A.shape)
+        # print("B.shape:", B.shape)
+        assert A.shape[1] == B.shape[0]
+
+        M, K = A.shape
+        K, N = B.shape
+        C = torch.empty((M, N), device=device, dtype=A.dtype)
+        A_addrs.append(A.data_ptr())
+        B_addrs.append(B.data_ptr())
+        C_addrs.append(C.data_ptr())
+        g_sizes += [M, N, K]
+        g_lds += [A.stride(0), B.stride(0), C.stride(0)]
+        
+        group_C.append(C)
+        # print(i, ":", C.data_ptr())
+    # torch.mlu.synchronize()
+    # cur_time = time.time()
+    # print("copy duration 2:", cur_time- last_time)
+    # last_time = cur_time
+        
+    # note these are device tensors
+    d_a_ptrs = torch.tensor(A_addrs, device=device)
+    d_b_ptrs = torch.tensor(B_addrs, device=device)
+    d_c_ptrs = torch.tensor(C_addrs, device=device)
+    d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
+    d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
+    
+    # torch.mlu.synchronize()
+    # cur_time = time.time()
+    # print("copy duration 3:", cur_time- last_time)
+    # last_time = cur_time
+    # start = time.time()
+    # we use a fixed number of CTA, and it's auto-tunable
+    grid = lambda META: (META["NUM_SM"],)
+    grouped_matmul_kernel[grid](
+        d_a_ptrs,
+        d_b_ptrs,
+        d_c_ptrs,
+        d_g_sizes,
+        d_g_lds,
+        group_size,
+    )
+    # torch.mlu.synchronize()
+    # duration = time.time() - start
+    # if trans_b:
+    #     print("trans_b_")
+    # print("grouped_matmul_kernel_duration", duration)
+    return torch.cat(group_C, dim=0)      
+
 
 
 def group_gemm_fn(group_A, group_B):
@@ -258,7 +596,7 @@ def group_gemm_fn(group_A, group_B):
     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
     # we use a fixed number of CTA, and it's auto-tunable
     grid = lambda META: (META["NUM_SM"],)#??
-    grouped_matmul_kernel[grid](
+    grouped_matmul_kernel_v2[grid](
         d_a_ptrs,
         d_b_ptrs,
         d_c_ptrs,
@@ -272,9 +610,9 @@ def group_gemm_fn(group_A, group_B):
 
 def test():
     device = "mlu"
-    group_m = [1024, 512, 256, 128]
-    group_n = [1024, 512, 256, 128]
-    group_k = [1024, 512, 256, 128]
+    group_m = [384, 1024, 512, 256, 128]
+    group_n = [10944, 1024, 512, 256, 128]
+    group_k = [2048, 1024, 512, 256, 128]
     group_A = []
     group_B = []
     assert len(group_m) == len(group_n)

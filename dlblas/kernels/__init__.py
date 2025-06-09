@@ -42,4 +42,4 @@ def import_all_modules_from_folder(folder_path):
 # Usage example
 folder_path = dir_path = os.path.dirname(os.path.realpath(__file__))
 
-import_all_modules_from_folder(folder_path)
+# import_all_modules_from_folder(folder_path)

@@ -5,13 +5,13 @@ import triton.language as tl
 
 from dlblas.utils.device_utils import is_muxi
 
-if triton.__version__ >= '3.0.0':
-    from triton.language.extra.cuda.libdevice import fast_expf as tl_exp
-else:
-    from triton.language.math import fast_expf as tl_exp
+# if triton.__version__ >= '3.0.0':
+#     from triton.language.extra.cuda.libdevice import fast_expf as tl.exp
+# else:
+#     from triton.language.math import fast_expf as tl.exp
 
-TESLA = 'Tesla' in torch.cuda.get_device_name(0)
-TESLA = TESLA or is_muxi()
+TESLA = False #'Tesla' in torch.cuda.get_device_name(0)
+# TESLA = TESLA or is_muxi()
 
 
 @triton.jit
@@ -314,12 +314,12 @@ def _fwd_kernel_no_prompt_cache(
 
         # -- compute m_ij, p, l_ij
         m_ij = tl.max(qk, 1)
-        p = tl_exp(qk - m_ij[:, None])
+        p = tl.exp(qk - m_ij[:, None])
         l_ij = tl.sum(p, 1)
         # -- update m_i and l_i
         m_i_new = tl.maximum(m_i, m_ij)
-        alpha = tl_exp(m_i - m_i_new)
-        beta = tl_exp(m_ij - m_i_new)
+        alpha = tl.exp(m_i - m_i_new)
+        beta = tl.exp(m_ij - m_i_new)
         l_i_new = alpha * l_i + beta * l_ij
         # -- update output accumulator --
         # scale p
@@ -359,12 +359,12 @@ def _fwd_kernel_no_prompt_cache(
 
         # -- compute m_ij, p, l_ij
         m_ij = tl.max(qk, 1)
-        p = tl_exp(qk - m_ij[:, None])
+        p = tl.exp(qk - m_ij[:, None])
         l_ij = tl.sum(p, 1)
         # -- update m_i and l_i
         m_i_new = tl.maximum(m_i, m_ij)
-        alpha = tl_exp(m_i - m_i_new)
-        beta = tl_exp(m_ij - m_i_new)
+        alpha = tl.exp(m_i - m_i_new)
+        beta = tl.exp(m_ij - m_i_new)
         l_i_new = alpha * l_i + beta * l_ij
         # -- update output accumulator --
         # scale p
@@ -394,12 +394,12 @@ def _fwd_kernel_no_prompt_cache(
 
         # -- compute m_ij, p, l_ij
         m_ij = tl.max(qk, 1)
-        p = tl_exp(qk - m_ij[:, None])
+        p = tl.exp(qk - m_ij[:, None])
         l_ij = tl.sum(p, 1)
         # -- update m_i and l_i
         m_i_new = tl.maximum(m_i, m_ij)
-        alpha = tl_exp(m_i - m_i_new)
-        beta = tl_exp(m_ij - m_i_new)
+        alpha = tl.exp(m_i - m_i_new)
+        beta = tl.exp(m_ij - m_i_new)
         l_i_new = alpha * l_i + beta * l_ij
         # -- update output accumulator --
         # scale p

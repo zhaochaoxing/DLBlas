@@ -46,7 +46,7 @@ def _multinomial_sampling_kernel(
     n_off = tl.arange(0, BLOCK_N)
 
     off_mask = off < num_batchs
-    seed = tl.load(Seeds + off, mask=off_mask, other=0.0)
+    seed = tl.load(Seeds + off, mask=off_mask, other=0.0).to(tl.int32)
     offset = tl.load(Offsets + off, mask=off_mask, other=0.0).to(tl.int32)
 
     samp = tl.rand(seed, offset)[:, None]

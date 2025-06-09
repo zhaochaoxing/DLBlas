@@ -5,6 +5,7 @@ import pytest
 # import torch_mlu
 # import torch_mlu.utils.gpu_migration
 import torch
+import torch_npu
 import triton
 
 from dlblas.kernels.paged_attention import paged_attention_fwd
@@ -23,9 +24,9 @@ def _make_bias(seq_lens, history_lens, neg_val):
     seq_ranges = [torch.arange(max_seq_len) for _ in seq_lens]
     for r, l in zip(seq_ranges, seq_lens):
         r[l:] = -max_full_len
-    seq_ranges = torch.stack(seq_ranges, dim=0).cuda()
+    seq_ranges = torch.stack(seq_ranges, dim=0).npu()
     kv_ranges = [torch.arange(max_full_len) for _ in full_seq_lens]
-    kv_ranges = torch.stack(kv_ranges, 0).cuda()
+    kv_ranges = torch.stack(kv_ranges, 0).npu()
     mask = kv_ranges[:, None, :] - seq_ranges[:, :, None] > history_lens[:, None, None]
     return mask.float() * neg_val
 
@@ -125,7 +126,7 @@ def _batched_q(seq_lens, num_heads_q, feat_dim, dtype):
     torch.manual_seed(123)
     batch_size = len(seq_lens)
     max_seq_len = seq_lens.max().item()
-    return torch.randn(batch_size, max_seq_len, num_heads_q, feat_dim, dtype=dtype, device='cuda')
+    return torch.randn(batch_size, max_seq_len, num_heads_q, feat_dim, dtype=dtype, device='npu')
 
 
 def _batched_kv(seq_lens, history_lens, num_heads_k, feat_dim, feat_dim_v, dtype):
@@ -133,8 +134,8 @@ def _batched_kv(seq_lens, history_lens, num_heads_k, feat_dim, feat_dim_v, dtype
     batch_size = len(seq_lens)
     full_seq_lens = seq_lens + history_lens
     max_seq_len = full_seq_lens.max().item()
-    k = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim, dtype=dtype, device='cuda')
-    v = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim_v, dtype=dtype, device='cuda')
+    k = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim, dtype=dtype, device='npu')
+    v = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim_v, dtype=dtype, device='npu')
     return k, v
 
 
@@ -156,7 +157,7 @@ def _block_offsets(seq_lens, history_lens, block_size):
 
     print(new_offset)
 
-    return new_offset.cuda()
+    return new_offset.npu()
 
 
 def _conti_kv(batched_kv, seq_lens, history_lens):
@@ -237,10 +238,10 @@ def test():
     feat_dim_v = 16
     num_heads_q = 4
     num_heads_k = 2
-    seq_lens = torch.tensor([128], device='cuda')
+    seq_lens = torch.tensor([128], device='npu')
     start_loc = _start_loc(seq_lens)
     block_size = 16
-    history_lens = torch.tensor([128], device='cuda')
+    history_lens = torch.tensor([128], device='npu')
     win_size = 32
 
     batched_q = _batched_q(seq_lens, num_heads_q, feat_dim, dtype)
@@ -296,7 +297,7 @@ def test():
         ))
 
     @triton.testing.perf_report(configs)
-    def bench_fn(op, provider, device='cuda'):
+    def bench_fn(op, provider, device='npu'):
         warmup = 100
         rep = 200
 

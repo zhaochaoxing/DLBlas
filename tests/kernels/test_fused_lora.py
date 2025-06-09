@@ -22,11 +22,11 @@ class TestFusedLoRA:
 
     @pytest.fixture
     def seq_lens(self, request):
-        yield torch.tensor(request.param).cuda()
+        yield torch.tensor(request.param).npu()
 
     @pytest.fixture
     def ranks(self):
-        yield torch.tensor([2, 4]).cuda()
+        yield torch.tensor([2, 4]).npu()
 
     @pytest.fixture
     def start_loc(self, seq_lens):
@@ -35,25 +35,25 @@ class TestFusedLoRA:
     @pytest.fixture
     def input(self, seq_lens, head_size, dtype):
         total_len = seq_lens.sum()
-        yield torch.rand(total_len, head_size, dtype=dtype).cuda()
+        yield torch.rand(total_len, head_size, dtype=dtype).npu()
 
     @pytest.fixture
     def adapter_ids(self, seq_lens, ranks):
         num_ranks = len(ranks)
         num_seqs = len(seq_lens)
         ret = torch.arange(0, num_seqs) % num_ranks
-        ret = ret.cuda()
+        ret = ret.npu()
         yield ret
 
     @pytest.fixture
     def scaling(self, ranks):
-        yield torch.arange(ranks.size(0)).cuda() + 1
+        yield torch.arange(ranks.size(0)).npu() + 1
 
     @pytest.fixture
     def lora_a(self, ranks, head_size, dtype):
         out = []
         for rank in ranks:
-            w = torch.rand(head_size, rank, dtype=dtype).cuda()
+            w = torch.rand(head_size, rank, dtype=dtype).npu()
             out.append(w)
         yield out
 
@@ -61,7 +61,7 @@ class TestFusedLoRA:
     def lora_b(self, ranks, out_head_size, dtype):
         out = []
         for rank in ranks:
-            w = torch.rand(rank, out_head_size, dtype=dtype).cuda()
+            w = torch.rand(rank, out_head_size, dtype=dtype).npu()
             out.append(w)
         yield out
 

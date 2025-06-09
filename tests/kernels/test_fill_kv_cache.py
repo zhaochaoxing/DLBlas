@@ -58,7 +58,7 @@ class TestFillKVCache:
 
     @pytest.fixture
     def q_seq_length(self, seq_lens):
-        yield torch.tensor(seq_lens).cuda()
+        yield torch.tensor(seq_lens).npu()
 
     @pytest.fixture
     def q_start_loc(self, q_seq_length):
@@ -67,11 +67,11 @@ class TestFillKVCache:
 
     @pytest.fixture
     def kv_seq_length(self, kv_lens):
-        yield torch.tensor(kv_lens).cuda()
+        yield torch.tensor(kv_lens).npu()
 
     @pytest.fixture
     def k_states(self, num_tokens, num_heads, head_dim):
-        yield torch.rand(num_tokens, num_heads, head_dim).cuda()
+        yield torch.rand(num_tokens, num_heads, head_dim).npu()
 
     @pytest.fixture
     def v_states(self, k_states):
@@ -80,7 +80,7 @@ class TestFillKVCache:
     @pytest.fixture
     def k_caches(self, batch_size, max_num_blocks, block_size, num_heads, head_dim):
         shape = (batch_size * max_num_blocks, block_size, num_heads, head_dim)
-        yield torch.full(shape, 0.0).cuda()
+        yield torch.full(shape, 0.0).npu()
 
     @pytest.fixture
     def v_caches(self, k_caches):
@@ -93,7 +93,7 @@ class TestFillKVCache:
         batch_ids = torch.arange(batch_size)
         ret = torch.arange(max_num_blocks)
         ret = batch_ids[:, None] + ret[None, :] * batch_size
-        yield ret.cuda()
+        yield ret.npu()
 
     @pytest.fixture
     def gt(

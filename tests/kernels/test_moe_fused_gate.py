@@ -23,9 +23,9 @@ def test_moe_fused_gate_combined(seq_length, dtype, params):
     num_experts, num_expert_group, topk_group, topk = params
     routed_scaling_factor = 0
     torch.manual_seed(seq_length)
-    tensor = torch.rand((seq_length, num_experts)).to(dtype).cuda()
+    tensor = torch.rand((seq_length, num_experts)).to(dtype).npu()
     scores = tensor.clone()
-    bias = torch.rand(num_experts).to(dtype).cuda()
+    bias = torch.rand(num_experts).to(dtype).npu()
 
     output, indices = dlblas.moe_fused_gate(tensor,
                                             bias,

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 import dlblas
+from dlblas.kernels.layernorm_gated import call as dlblas_layernorm_gated
 
 
 def rms_norm_ref(x, weight, bias, z=None, eps=1e-6, group_size=None, norm_before_gate=True, upcast=True):
@@ -52,7 +53,7 @@ def test_layer_norm_gated(d, dtype, wtype, has_bias, has_z, is_rms_norm, has_gro
         pytest.skip()
     if not norm_before_gate and not is_rms_norm:  # Reference LN isn't implemented for this case yet
         pytest.skip()
-    device = 'cuda'
+    device = 'npu'
     rtol, atol = (1e-5, 1e-5) if dtype == torch.float32 else (1e-2, 8e-3)
     group_size = None if not has_group else 64
     # set seed
@@ -77,7 +78,7 @@ def test_layer_norm_gated(d, dtype, wtype, has_bias, has_z, is_rms_norm, has_gro
     weight_pt = weight.detach().clone().requires_grad_()
     bias_ref = bias.detach().clone().requires_grad_() if bias is not None else None
     bias_pt = bias.detach().clone().requires_grad_() if bias is not None else None
-    out = dlblas.layernorm_gated(x,
+    out = dlblas_layernorm_gated(x,
                                  weight,
                                  bias,
                                  z=z,

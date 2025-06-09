@@ -13,6 +13,7 @@ from torch.profiler import ProfilerActivity, profile, record_function
 import dlblas
 from dlblas.kernels.flash_attention_v2 import _flash_attn_forward as flash_attention_v2
 from dlblas.kernels.partial_rotary_emb import PartialRotaryEmb
+from dlblas.kernels.partial_rotary_emb import call as dlblas_partial_rotary_emb
 from dlblas.utils.device_utils import get_idle_device
 
 
@@ -157,8 +158,8 @@ def test_emb(q, k_pe, kv, cos, sin):
     return q_out, kv_out, q_pe, k_pe
 
 
-device_ = torch.device(get_idle_device())
-torch.cuda.set_device(device_)
+device_ = 'npu'#torch.device(get_idle_device())
+torch.npu.set_device(device_)
 
 
 class ApplyRotaryEmb(torch.autograd.Function):
@@ -279,7 +280,7 @@ def test():
     assert torch.allclose(q.grad, q_test.grad)
     assert torch.allclose(k_pe.grad, k_pe_test.grad)
     assert torch.allclose(kv.grad, kv_test.grad)
-    out_tri_q, out_tri_kv = dlblas.partial_rotary_emb(q_tri, k_pe_tri, kv_tri, cos, sin)
+    out_tri_q, out_tri_kv = dlblas_partial_rotary_emb(q_tri, k_pe_tri, kv_tri, cos, sin)
     assert torch.allclose(out_q, out_tri_q)
     assert torch.allclose(out_kv, out_tri_kv)
     loss_tri = torch.sum(torch.mean(out_tri_q) * torch.mean(out_tri_kv))
@@ -292,7 +293,7 @@ def test():
     assert torch.allclose(kv.grad, kv_tri.grad)
     if False:
         with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                activities=[ProfilerActivity.CPU, ProfilerActivity.npu],
                 record_shapes=False,
                 profile_memory=False,
                 with_stack=False,
@@ -300,15 +301,15 @@ def test():
                 with_modules=False,
         ) as prof:
             out_q, out_kv = partial_rotary_emb(q, k_pe, kv, cos, sin)
-            torch.cuda.synchronize()
+            torch.npu.synchronize()
             loss_torch = torch.sum(torch.mean(out_q) * torch.mean(out_kv))
             loss_torch.backward(retain_graph=True)
-            torch.cuda.synchronize()
-            out_tri_q, out_tri_kv = dlblas.partial_rotary_emb(q_tri, k_pe_tri, kv_tri, cos, sin)
-            torch.cuda.synchronize()
+            torch.npu.synchronize()
+            out_tri_q, out_tri_kv = dlblas_partial_rotary_emb(q_tri, k_pe_tri, kv_tri, cos, sin)
+            torch.npu.synchronize()
             loss_tri = torch.sum(torch.mean(out_tri_q) * torch.mean(out_tri_kv))
             loss_tri.backward(retain_graph=True)
-            torch.cuda.synchronize()
+            torch.npu.synchronize()
             assert torch.allclose(q.grad, q_tri.grad)
             assert torch.allclose(k_pe.grad, k_pe_tri.grad)
             assert torch.allclose(kv.grad, kv_tri.grad)

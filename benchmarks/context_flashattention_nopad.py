@@ -3,6 +3,7 @@ import math
 
 import numpy as np
 import torch
+import torch_npu
 import torch.nn.functional as F
 import triton
 
@@ -16,7 +17,7 @@ def torch_att(q, q_rope, kv, kv_rope, bs, seqlen, num_head, q_head_dim, rope_hea
     xk = torch.cat([kv, kv_rope], dim=2).view(bs, seqlen, 1, -1)
     xv = kv.view(bs, seqlen, 1, -1)
 
-    mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=0).unsqueeze(0).unsqueeze(0).cuda()
+    mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=0).unsqueeze(0).unsqueeze(0).npu()
     mask[mask == 0.0] = -100000000.0
     mask = mask.repeat(bs, num_head, 1, 1)
     keys = xk
@@ -31,35 +32,35 @@ def torch_att(q, q_rope, kv, kv_rope, bs, seqlen, num_head, q_head_dim, rope_hea
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    device_ = 'npu'#torch.device(get_idle_device())
+    torch.npu.set_device(device_)
 
     Z, H, N_CTX, D_HEAD, ROPE_HEAD = 1, 6, 5000, 128, 64
     dtype = torch.float16
     Z = 1
-    q = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='cuda').normal_(mean=0.3, std=0.2)
-    q_rope = torch.empty((Z * N_CTX, H, ROPE_HEAD), dtype=dtype, device='cuda').normal_(mean=0.3, std=0.2)
+    q = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='npu').normal_(mean=0.3, std=0.2)
+    q_rope = torch.empty((Z * N_CTX, H, ROPE_HEAD), dtype=dtype, device='npu').normal_(mean=0.3, std=0.2)
 
-    kv = torch.empty((Z * N_CTX, 1, D_HEAD), dtype=dtype, device='cuda').normal_(mean=0.3, std=0.2)
-    kv_rope = torch.empty((Z * N_CTX, 1, ROPE_HEAD), dtype=dtype, device='cuda').normal_(mean=0.3, std=0.2)
+    kv = torch.empty((Z * N_CTX, 1, D_HEAD), dtype=dtype, device='npu').normal_(mean=0.3, std=0.2)
+    kv_rope = torch.empty((Z * N_CTX, 1, ROPE_HEAD), dtype=dtype, device='npu').normal_(mean=0.3, std=0.2)
 
-    o = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='cuda').normal_(mean=0.7, std=0.2)
-    o1 = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='cuda').normal_(mean=0.7, std=0.2)
+    o = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='npu').normal_(mean=0.7, std=0.2)
+    o1 = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device='npu').normal_(mean=0.7, std=0.2)
 
-    req_to_token_indexs = torch.zeros((10, Z * N_CTX), dtype=torch.int32, device='cuda')
+    req_to_token_indexs = torch.zeros((10, Z * N_CTX), dtype=torch.int32, device='npu')
     max_input_len = N_CTX
     Z = 1
-    b_start_loc = torch.zeros((Z, ), dtype=torch.int32, device='cuda')
-    b_seq_len = torch.ones((Z, ), dtype=torch.int32, device='cuda')
-    b_req_idx = torch.ones((Z, ), dtype=torch.int32, device='cuda')
-    b_prompt_cache_len = torch.zeros(1, dtype=torch.int32, device='cuda')
+    b_start_loc = torch.zeros((Z, ), dtype=torch.int32, device='npu')
+    b_seq_len = torch.ones((Z, ), dtype=torch.int32, device='npu')
+    b_req_idx = torch.ones((Z, ), dtype=torch.int32, device='npu')
+    b_prompt_cache_len = torch.zeros(1, dtype=torch.int32, device='npu')
     b_prompt_cache_len[0] = 0
     prompt_cache_len = 0
 
     b_seq_len[0] = N_CTX
     b_req_idx[0] = 0
     req_to_token_indexs[0][:prompt_cache_len + N_CTX] = torch.tensor(np.arange(prompt_cache_len + N_CTX),
-                                                                     dtype=torch.int32).cuda()
+                                                                     dtype=torch.int32).npu()
 
     softmax_scale = 1 / math.sqrt(D_HEAD + ROPE_HEAD)
 

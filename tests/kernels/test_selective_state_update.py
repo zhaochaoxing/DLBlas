@@ -80,7 +80,7 @@ def selective_state_update_ref(state, x, dt, A, B, C, D=None, z=None, dt_bias=No
 @pytest.mark.parametrize('dim', [2048, 2048 + 16, 4096])
 # @pytest.mark.parametrize("dim", [2048])
 def test_selective_state_update(dim, dstate, has_z, itype):
-    device = 'cuda'
+    device = 'npu'
     rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (5e-3, 1e-2)
     if itype == torch.bfloat16:
         rtol, atol = 1e-2, 5e-2
@@ -124,7 +124,7 @@ def test_selective_state_update(dim, dstate, has_z, itype):
 # @pytest.mark.parametrize("dim", [2048, 4096])
 @pytest.mark.parametrize('dim', [2048])
 def test_selective_state_update_with_heads(dim, dstate, ngroups, has_z, tie_hdim, itype):
-    device = 'cuda'
+    device = 'npu'
     rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (5e-3, 3e-2)
     if itype == torch.bfloat16:
         rtol, atol = 1e-2, 1e-1

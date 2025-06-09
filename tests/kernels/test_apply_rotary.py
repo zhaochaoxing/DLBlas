@@ -37,7 +37,7 @@ class TestApplyRotary:
 
     @pytest.fixture
     def seq_length(self, batch_size):
-        yield torch.randint(8, 16, (batch_size, ), device='cuda')
+        yield torch.randint(8, 16, (batch_size, ), device='npu')
 
     @pytest.fixture
     def max_seqlen(self, seq_length):
@@ -45,23 +45,23 @@ class TestApplyRotary:
 
     @pytest.fixture
     def q_states(self, seq_length, num_heads_q, feature_dim, dtype):
-        yield torch.rand(seq_length.sum(), num_heads_q, feature_dim, dtype=dtype, device='cuda')
+        yield torch.rand(seq_length.sum(), num_heads_q, feature_dim, dtype=dtype, device='npu')
 
     @pytest.fixture
     def k_states(self, seq_length, num_heads_k, feature_dim, dtype):
-        yield torch.rand(seq_length.sum(), num_heads_k, feature_dim, dtype=dtype, device='cuda')
+        yield torch.rand(seq_length.sum(), num_heads_k, feature_dim, dtype=dtype, device='npu')
 
     @pytest.fixture
     def position_ids_1d(self, seq_length, max_seqlen):
-        yield torch.randint(0, max_seqlen.item(), (seq_length.sum().item(), ), device='cuda')
+        yield torch.randint(0, max_seqlen.item(), (seq_length.sum().item(), ), device='npu')
 
     @pytest.fixture
     def cached_cos(self, max_seqlen, feature_dim, dtype):
-        yield torch.rand(max_seqlen, feature_dim, dtype=dtype, device='cuda')
+        yield torch.rand(max_seqlen, feature_dim, dtype=dtype, device='npu')
 
     @pytest.fixture
     def cached_sin(self, max_seqlen, feature_dim, dtype):
-        yield torch.rand(max_seqlen, feature_dim, dtype=dtype, device='cuda')
+        yield torch.rand(max_seqlen, feature_dim, dtype=dtype, device='npu')
 
     @pytest.fixture
     def cos(self, cached_cos, position_ids_1d):

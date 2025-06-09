@@ -383,7 +383,7 @@ class PartialRotaryEmb(torch.autograd.Function):
         stride_kpe_bsz, stride_kpe_seq, stride_kpe_head, stride_kpe_dim = k_pe.stride()
         stride_cos_bsz, stride_cos_seq, stride_cos_dim = cos.stride()
         out_kv = kv.new_empty(bsz, seq_len, 2, num_heads, q_head_dim)
-        with torch.cuda.device(q.device):
+        with torch.npu.device(q.device):
             grid = lambda META: (
                 bsz,
                 triton.cdiv(seq_len, META['BLOCK_SEQ']),
@@ -446,7 +446,7 @@ class PartialRotaryEmb(torch.autograd.Function):
         do_q = d_q.new_empty(bsz, seq_len, num_heads, q_head_dim)
         do_k_pe_tmp = d_q.new_empty(bsz, seq_len, num_heads, rope_head_dim)
         do_kv = torch.empty_like(kv)
-        with torch.cuda.device(d_q.device):
+        with torch.npu.device(d_q.device):
             grid = lambda META: (
                 bsz,
                 triton.cdiv(seq_len, META['BLOCK_SEQ']),
@@ -506,7 +506,7 @@ def bench_fn(q, k_pe, kv, cos, sin):
 # register
 name = 'partial_rotary_emb'
 for dtype in [torch.bfloat16, torch.float16, torch.float32]:
-    for device_ in ['cuda']:
+    for device_ in ['npu']:
         num_heads = SymVar('num_heads')
         qk_nope_head_dim = SymVar('qk_nope_head_dim')
         qk_rope_head_dim = SymVar('qk_rope_head_dim')

@@ -23,7 +23,7 @@ class TestFusedMoEKernelLauncher:
 
     @pytest.fixture
     def device(self):
-        yield torch.device('cuda')
+        yield torch.device('npu')
 
     @pytest.fixture
     def N(self):
@@ -126,7 +126,7 @@ class TestFusedMoEKernelLauncher:
         M,
         gt,
     ):
-        from lmdeploy.pytorch.kernels.cuda.fused_moe import fused_moe_kernel_launcher
+        from lmdeploy.pytorch.kernels.npu.fused_moe import fused_moe_kernel_launcher
 
         N = B.size(1)
         C = B.new_empty(M * top_k, N)
@@ -160,7 +160,7 @@ class TestFusedMoe:
 
     @pytest.fixture
     def device(self):
-        yield torch.device('cuda')
+        yield torch.device('npu')
 
     @pytest.fixture
     def in_size(self):

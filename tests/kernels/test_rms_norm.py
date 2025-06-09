@@ -14,11 +14,11 @@ class TestRMSNorm:
 
     @pytest.fixture(scope='class')
     def input(self, dtype):
-        yield torch.rand(4, 8, dtype=dtype, device='cuda')
+        yield torch.rand(4, 8, dtype=dtype, device='npu')
 
     @pytest.fixture(scope='class')
     def weight(self, dtype):
-        yield torch.rand(8, dtype=dtype, device='cuda')
+        yield torch.rand(8, dtype=dtype, device='npu')
 
     @pytest.fixture(scope='class')
     def eps(self):

@@ -12,7 +12,7 @@ import time
 
 from torch.profiler import ProfilerActivity, profile
 
-device_ = torch.device('cuda')
+device_ = torch.device('npu')
 
 
 def test():

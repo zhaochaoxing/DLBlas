@@ -110,7 +110,7 @@ def _layer_norm_fwd(x, weight, bias, eps, z=None, out=None, group_size=None, nor
     # heuristics for number of warps
     num_warps = min(max(BLOCK_N // 256, 1), 8)
     grid = (M, ngroups)
-    with torch.cuda.device(x.device.index):
+    with torch.npu.device(x.device.index):
         _layer_norm_fwd_1pass_kernel[grid](x,
                                            out,
                                            weight,
@@ -301,7 +301,7 @@ def _layer_norm_bwd(dy,
         raise RuntimeError("This layer norm doesn't support feature dim >= 64KB.")
     # heuristics for number of warps
     num_warps = min(max(BLOCK_N // 256, 1), 8)
-    sm_count = torch.cuda.get_device_properties(x.device).multi_processor_count
+    sm_count = torch.npu.get_device_properties(x.device).multi_processor_count
     # If group size is small (e.g., 64), we're only using 1 warp. So having just 108 programs
     # would limit the occupancy.
     nrow_groups = math.ceil(sm_count * math.ceil(4 / num_warps) / ngroups)
@@ -309,7 +309,7 @@ def _layer_norm_bwd(dy,
     _db = torch.empty((nrow_groups, N), dtype=torch.float32, device=bias.device) if bias is not None else None
     rows_per_program = math.ceil(M / nrow_groups)
     grid = (nrow_groups, ngroups)
-    with torch.cuda.device(x.device.index):
+    with torch.npu.device(x.device.index):
         _layer_norm_bwd_kernel[grid](x,
                                      weight,
                                      bias,
@@ -405,7 +405,7 @@ def bench_fn(x, weight, bias, z=None, eps=1e-6, group_size=None, norm_before_gat
 # register
 name = 'layernorm_gated'
 for dtype in [torch.float32, torch.float16, torch.bfloat16]:
-    for device in ['cuda']:
+    for device in ['npu']:
         batch, seqLen, d = SymVar('batch'), SymVar('seqLen'), SymVar('d')
         capacity_factor = SymVar('capacity_factor')
         min_capacity = SymVar('min_capacity')

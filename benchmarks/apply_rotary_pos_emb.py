@@ -1,10 +1,11 @@
 # Copyright (c) 2025, DeepLink.
 import torch
+import torch_npu
 import triton
 
 import dlblas
 from dlblas.kernels.apply_rotary_pos_emb import apply_rotary_pos_emb
-from dlblas.utils.device_utils import get_idle_device
+# from dlblas.utils.device_utils import get_idle_device
 
 
 def _rotate_half(x):
@@ -23,8 +24,8 @@ def torch_rotary_pos_emb(q_states, k_states, cached_cos, cached_sin, position_id
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    device_ = 'npu' #torch.device(get_idle_device())
+    # torch.cuda.set_device(device_)
     dtype_ = torch.float16
     b, s, h, d = 1, 256, 32, 128
     cached_cos = torch.randn((s, d), dtype=dtype_, device=device_)

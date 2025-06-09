@@ -8,12 +8,12 @@ import triton.language as tl
 from dlblas.utils import ChoiceSpace, SymVar, Tensor, register_dlblas_op
 from dlblas.utils.device_utils import is_cuda, is_muxi
 
-if triton.__version__ >= '3.0.0':
-    from triton.language.extra.cuda.libdevice import fast_expf as tl_exp
-    from triton.language.extra.cuda.libdevice import fast_logf as tl_log
-else:
-    from triton.language.math import fast_expf as tl_exp
-    from triton.language.math import fast_logf as tl_log
+# if False:#triton.__version__ >= '3.0.0':
+#     from triton.language.extra.cuda.libdevice import fast_expf as tl.exp
+#     from triton.language.extra.cuda.libdevice import fast_logf as tl.log
+# else:
+#     from triton.language.math import fast_expf as tl.exp
+#     from triton.language.math import fast_logf as tl.log
 
 MUXI_CUDA = is_muxi() or is_cuda()
 if MUXI_CUDA:
@@ -151,21 +151,21 @@ def _fwd_kernel(
                         & ((start_n + offs_n)[None, :] < seqlen_k),
                         other=0.0,
                     ).to(tl.float32)
-            # Slightly faster to multiply the softmax_scale in the tl_exp below since the compiler
+            # Slightly faster to multiply the softmax_scale in the tl.exp below since the compiler
             # can then fuse the mult and add into an fma instruction. But if we have bias we need to
             # to multiply with softmax_scale here.
             qk = qk * softmax_scale + bias
             m_ij = tl.maximum(tl.max(qk, 1), lse_i)
-            p = tl_exp(qk - m_ij[:, None])
+            p = tl.exp(qk - m_ij[:, None])
         else:
             m_ij = tl.maximum(lse_i, tl.max(qk, 1) * softmax_scale)
             qk = qk * softmax_scale - m_ij[:, None]
-            p = tl_exp(qk)
+            p = tl.exp(qk)
 
         l_ij = tl.sum(p, 1)
 
         # scale acc_o
-        acc_o_scale = tl_exp(m_i - m_ij).to(device_dtype)
+        acc_o_scale = tl.exp(m_i - m_ij).to(device_dtype)
         # # -- update output accumulator --
 
         acc_o = acc_o * acc_o_scale[:, None]
@@ -183,10 +183,10 @@ def _fwd_kernel(
         acc_o += tl.dot(p, v, out_dtype=device_dtype)
         # -- update statistics
         m_i = m_ij
-        l_i_new = tl_exp(lse_i - m_ij) + l_ij
-        lse_i = m_ij + tl_log(l_i_new)
+        l_i_new = tl.exp(lse_i - m_ij) + l_ij
+        lse_i = m_ij + tl.log(l_i_new)
 
-    o_scale = tl_exp(m_i - lse_i)
+    o_scale = tl.exp(m_i - lse_i)
     acc_o = acc_o * o_scale[:, None]
     #
     # store

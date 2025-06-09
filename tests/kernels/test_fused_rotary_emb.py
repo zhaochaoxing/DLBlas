@@ -91,19 +91,19 @@ class TestFusedRotaryEmb:
 
     @pytest.fixture
     def q(self, batch_size, seq_len, q_num_heads, head_dim, dtype):
-        yield torch.rand(batch_size, seq_len, q_num_heads, head_dim, dtype=dtype).to('cuda')
+        yield torch.rand(batch_size, seq_len, q_num_heads, head_dim, dtype=dtype).to('npu')
 
     @pytest.fixture
     def k(self, batch_size, seq_len, k_num_heads, head_dim, dtype):
-        yield torch.rand(batch_size, seq_len, k_num_heads, head_dim, dtype=dtype).to('cuda')
+        yield torch.rand(batch_size, seq_len, k_num_heads, head_dim, dtype=dtype).to('npu')
 
     @pytest.fixture
     def position_ids(self, batch_size, seq_len):
-        yield torch.randint(0, seq_len + 100, (batch_size, seq_len)).cuda()
+        yield torch.randint(0, seq_len + 100, (batch_size, seq_len)).npu()
 
     @pytest.fixture
     def rotary_emb(self, head_dim):
-        yield DummyLinearScalingRotaryEmbedding(head_dim, scaling_factor=1.0).to('cuda')
+        yield DummyLinearScalingRotaryEmbedding(head_dim, scaling_factor=1.0).to('npu')
 
     @pytest.fixture
     def gt(self, q, k, position_ids, rotary_emb):

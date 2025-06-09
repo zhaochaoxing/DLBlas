@@ -26,30 +26,30 @@ class TestMultinomialSampling:
 
     @pytest.fixture
     def scores(self, num_tokens, batch_size, select_ids, dtype):
-        ret = torch.zeros(batch_size, num_tokens).cuda()
-        batch_ids = torch.arange(batch_size).cuda()
+        ret = torch.zeros(batch_size, num_tokens).npu()
+        batch_ids = torch.arange(batch_size).npu()
         ret[batch_ids, select_ids] = 1
         ret = ret.to(dtype)
         yield ret
 
     @pytest.fixture
     def seeds(self, batch_size):
-        yield torch.randint(1000, 2000, (batch_size, )).cuda()
+        yield torch.randint(1000, 2000, (batch_size, )).npu()
 
     @pytest.fixture
     def offsets(self, batch_size):
-        yield torch.randint(1000, 2000, (batch_size, )).cuda()
+        yield torch.randint(1000, 2000, (batch_size, )).npu()
 
     @pytest.fixture
     def indices(self, scores):
         num_tokens = scores.size(1)
         ret = [torch.randperm(num_tokens) for _ in scores]
-        ret = torch.stack(ret, 0).cuda()
+        ret = torch.stack(ret, 0).npu()
         yield ret
 
     @pytest.fixture
     def gt(self, batch_size, select_ids, indices):
-        batch_ids = torch.arange(batch_size).cuda()
+        batch_ids = torch.arange(batch_size).npu()
         yield indices[batch_ids, select_ids]
 
     @pytest.mark.parametrize('dtype', [torch.float32, torch.half, torch.bfloat16])

@@ -66,8 +66,8 @@ def ref_selective_scan(u, delta, A, B, C, initial_state):
     return y.to(original_dtype), x
 
 
-device_ = torch.device(get_idle_device())
-torch.cuda.set_device(device_)
+device_ = 'npu'#torch.device(get_idle_device())
+torch.npu.set_device(device_)
 
 
 def test():
@@ -76,14 +76,14 @@ def test():
     D = 512
     K = 16
     dtype = torch.float32
-    A = (-(torch.rand(D, K, dtype=dtype)).exp().cuda()).requires_grad_(True)
-    x = torch.randn(B, T, D, dtype=dtype).cuda().requires_grad_(True)
-    delta = torch.randn(B, T, D, dtype=dtype).sigmoid().cuda().requires_grad_(True)
-    B2 = torch.randn(B, T, K, dtype=dtype).cuda().requires_grad_(True)
-    C = torch.randn(B, T, K, dtype=dtype).cuda().requires_grad_(True)
-    D2 = torch.randn(D, dtype=dtype).cuda().requires_grad_(True)
+    A = (-(torch.rand(D, K, dtype=dtype)).exp().npu()).requires_grad_(True)
+    x = torch.randn(B, T, D, dtype=dtype).npu().requires_grad_(True)
+    delta = torch.randn(B, T, D, dtype=dtype).sigmoid().npu().requires_grad_(True)
+    B2 = torch.randn(B, T, K, dtype=dtype).npu().requires_grad_(True)
+    C = torch.randn(B, T, K, dtype=dtype).npu().requires_grad_(True)
+    D2 = torch.randn(D, dtype=dtype).npu().requires_grad_(True)
 
-    initial_state = torch.randn(B, D, K, dtype=dtype).cuda().requires_grad_(False)
+    initial_state = torch.randn(B, D, K, dtype=dtype).npu().requires_grad_(False)
 
     tri, tri_final = SelectiveScan.apply(x, delta, A, B2, C, initial_state)
     do = torch.randn_like(tri)

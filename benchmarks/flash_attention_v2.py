@@ -7,12 +7,12 @@ import dlblas
 from dlblas.kernels.flash_attention_v2 import _flash_attn_forward as flash_attention_v2
 from dlblas.utils.device_utils import get_idle_device, is_cuda, is_muxi
 
-MUXI_CUDA = is_muxi() or is_cuda()
+MUXI_CUDA = False #is_muxi() or is_cuda()
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    device_ = 'npu'#torch.device(get_idle_device())
+    # torch.cuda.set_device(device_)
     dtype = torch.float16
     if MUXI_CUDA:
         dtype = torch.float32

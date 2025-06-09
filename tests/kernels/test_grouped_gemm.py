@@ -7,7 +7,7 @@ from dlblas.kernels.grouped_gemm import grouped_gemm
 class TestGroupedGemm:
 
     def test_grouped_gemm(self):
-        DEVICE = 'cuda'
+        DEVICE = 'npu'
         group_m = [1024, 512, 256, 128]
         group_n = [1024, 512, 256, 128]
         group_k = [1024, 512, 256, 128]

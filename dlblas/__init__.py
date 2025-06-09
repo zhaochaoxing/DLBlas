@@ -4,7 +4,7 @@ from typing import Tuple
 import torch
 from torch import Tensor
 
-import dlblas._DLBLAS  # noqa
+# import dlblas._DLBLAS  # noqa
 # this import all kernels dynamically
 import dlblas.kernels  # noqa
 from dlblas.utils import get_op

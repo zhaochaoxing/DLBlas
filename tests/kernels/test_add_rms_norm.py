@@ -3,7 +3,8 @@ import torch
 from torch.nn.parameter import Parameter
 
 import dlblas
-
+from dlblas.kernels.rms_norm import rms_norm as dlblas_rms_norm
+from dlblas.kernels.add_rms_norm import call as dlblas_add_rms_norm
 
 class FuseRMSNorm(torch.nn.Module):
 
@@ -47,12 +48,12 @@ def compare_tensor(a, b, prec):
 def test_add_rms_norm0():
     H, C = 4096, 4096
     eps = 1e-6
-    input = torch.randn(H, C, device='cuda', dtype=torch.half)
+    input = torch.randn(H, C, device='npu', dtype=torch.half)
     ref_input = input.clone()
-    residual = torch.randn(H, C, device='cuda', dtype=torch.half)
+    residual = torch.randn(H, C, device='npu', dtype=torch.half)
     ref_residual = residual.clone()
-    weight = Parameter(torch.randn(C, device='cuda', dtype=torch.half))
-    ref_normed_out, ref_added_out = dlblas.add_rms_norm(ref_input, weight, ref_residual, eps)
+    weight = Parameter(torch.randn(C, device='npu', dtype=torch.half))
+    ref_normed_out, ref_added_out = dlblas_add_rms_norm(ref_input, weight, eps, ref_residual)
     rms_norm = FuseRMSNorm(weight, eps=eps)
     normed_out, added_out = rms_norm(input, residual)
     print('max abs diff: ', torch.max(abs(ref_normed_out - normed_out)))
@@ -65,10 +66,10 @@ def test_add_rms_norm0():
 def test_rms_norm0():
     H, C = 4096, 4096
     eps = 1e-6
-    input = torch.randn(H, C, device='cuda', dtype=torch.half)
+    input = torch.randn(H, C, device='npu', dtype=torch.half)
     ref_input = input.clone()
-    weight = Parameter(torch.randn(C, device='cuda', dtype=torch.half))
-    ref_normed_out = dlblas.rms_norm(ref_input, weight, eps)
+    weight = Parameter(torch.randn(C, device='npu', dtype=torch.half))
+    ref_normed_out = dlblas_rms_norm(ref_input, weight, eps)
     rms_norm = FuseRMSNorm(weight, eps=eps)
     normed_out, added_out = rms_norm(input)
     print('max abs diff: ', torch.max(abs(ref_normed_out - normed_out)))

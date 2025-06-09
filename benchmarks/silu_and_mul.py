@@ -21,7 +21,7 @@ class TestSiluAndMul:
 
     @pytest.fixture
     def x(self, seqlen, feat_size):
-        yield torch.rand(seqlen, feat_size, dtype=torch.float16, device='cuda')
+        yield torch.rand(seqlen, feat_size, dtype=torch.float16, device='npu')
 
     @pytest.fixture
     def gt(self, x):
@@ -48,7 +48,7 @@ def _test_silu_and_mul(x):
 def test():
     seqlen = 256
     feat_size = 4096
-    x = torch.rand(seqlen, feat_size, dtype=torch.float16, device='cuda')
+    x = torch.rand(seqlen, feat_size, dtype=torch.float16, device='npu')
 
     gt = _gt(x)
     tt = _test_silu_and_mul(x)
@@ -69,7 +69,7 @@ def test():
         ))
 
     @triton.testing.perf_report(configs)
-    def bench_fn(op, provider, device='cuda'):
+    def bench_fn(op, provider, device='npu'):
         warmup = 100
         rep = 200
 

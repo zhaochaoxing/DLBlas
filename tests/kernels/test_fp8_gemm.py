@@ -16,19 +16,19 @@ class TestRMSNorm:
 
     @pytest.fixture(scope='class')
     def A(self):
-        yield torch.randn((M, K), device='cuda').to(torch.float8_e4m3fn)
+        yield torch.randn((M, K), device='npu').to(torch.float8_e4m3fn)
 
     @pytest.fixture(scope='class')
     def B(self):
-        yield torch.randn((K, N), device='cuda').to(torch.float8_e4m3fn)
+        yield torch.randn((K, N), device='npu').to(torch.float8_e4m3fn)
 
     @pytest.fixture(scope='class')
     def As(self):
-        yield torch.randn((M, num_block), device='cuda')
+        yield torch.randn((M, num_block), device='npu')
 
     @pytest.fixture(scope='class')
     def Bs(self):
-        yield torch.randn((num_block, num_block), device='cuda')
+        yield torch.randn((num_block, num_block), device='npu')
 
     @pytest.fixture(scope='class')
     def gt(self, A, B, As, Bs, output_dtype=torch.float32):

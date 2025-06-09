@@ -22,8 +22,8 @@ def test_rms_norm(input, weight, eps):
 
 def test():
     dtype = torch.float16
-    input = torch.rand(4, 8, dtype=dtype, device='cuda')
-    weight = torch.rand(8, dtype=dtype, device='cuda')
+    input = torch.rand(4, 8, dtype=dtype, device='npu')
+    weight = torch.rand(8, dtype=dtype, device='npu')
     eps = 1e-6
 
     gt = _gt(input, weight, eps)
@@ -45,7 +45,7 @@ def test():
         ))
 
     @triton.testing.perf_report(configs)
-    def bench_fn(op, provider, device='cuda'):
+    def bench_fn(op, provider, device='npu'):
         warmup = 100
         rep = 200
 

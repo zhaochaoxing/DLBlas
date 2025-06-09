@@ -5,6 +5,7 @@ import triton
 from einops import rearrange, repeat
 
 import dlblas
+from dlblas.kernels.layernorm_gated import call as layernorm_gated
 
 
 def torch_layernorm_gated(x_ref, weight_ref, bias_ref, z_ref, group_size):
@@ -40,7 +41,7 @@ def torch_rmsnorm_gated(x, weight, bias, z=None, eps=1e-6, group_size=None, norm
 
 
 def benchmark():
-    device_ = 'cuda'
+    device_ = 'npu'
     group_size = 64
     # set seed
     torch.random.manual_seed(0)
@@ -61,7 +62,7 @@ def benchmark():
     weight_pt = weight.detach().clone().requires_grad_()
     bias_ref = bias.detach().clone().requires_grad_() if bias is not None else None
     bias_pt = bias.detach().clone().requires_grad_() if bias is not None else None
-    out_tri_layernorm = dlblas.layernorm_gated(x,
+    out_tri_layernorm = layernorm_gated(x,
                                                weight,
                                                bias,
                                                z=z,
@@ -79,7 +80,7 @@ def benchmark():
                                          group_size=group_size,
                                          norm_before_gate=True,
                                          upcast=False)
-    out_tri_rmsnorm = dlblas.layernorm_gated(x,
+    out_tri_rmsnorm = layernorm_gated(x,
                                              weight,
                                              bias,
                                              z=z,
@@ -119,7 +120,7 @@ def benchmark():
         bias = torch.randn(d, dtype=wtype, device=device_, requires_grad=True)
         is_rmsnorm = (kernel == 'rmsnorm_gated')
         if 'triton' in provider:
-            fn = lambda: dlblas.layernorm_gated(
+            fn = lambda: layernorm_gated(
                 x, weight, bias, z=z, eps=1e-5, group_size=group_size, norm_before_gate=True, is_rms_norm=is_rmsnorm)
             ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 

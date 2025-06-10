@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 
 import dlblas
+from dlblas.kernels.selective_state_update import call as dlblas_selective_state_update
 
 
 def selective_state_update_ref(state, x, dt, A, B, C, D=None, z=None, dt_bias=None, dt_softplus=False):
@@ -102,7 +103,7 @@ def test_selective_state_update(dim, dstate, has_z, itype):
     else:
         z = None
     state_ref = state.detach().clone()
-    out = dlblas.selective_state_update(state, x, dt, A, B, C, D=D, z=z, dt_bias=dt_bias, dt_softplus=True)
+    out = dlblas_selective_state_update(state, x, dt, A, B, C, D=D, z=z, dt_bias=dt_bias, dt_softplus=True)
     out_ref = selective_state_update_ref(state_ref, x, dt, A, B, C, D=D, z=z, dt_bias=dt_bias, dt_softplus=True)
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")
@@ -152,7 +153,7 @@ def test_selective_state_update_with_heads(dim, dstate, ngroups, has_z, tie_hdim
     else:
         z = None
     state_ref = state.detach().clone()
-    out = dlblas.selective_state_update(state, x, dt, A, B, C, D, z=None, dt_bias=dt_bias, dt_softplus=True)
+    out = dlblas_selective_state_update(state, x, dt, A, B, C, D, z=None, dt_bias=dt_bias, dt_softplus=True)
     out_ref = selective_state_update_ref(state_ref, x, dt, A, B, C, D, z=None, dt_bias=dt_bias, dt_softplus=True)
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")

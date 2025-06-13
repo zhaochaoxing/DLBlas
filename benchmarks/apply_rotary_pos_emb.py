@@ -1,11 +1,32 @@
 # Copyright (c) 2025, DeepLink.
 import torch
 import triton
+import triton.backends
 
 import dlblas
 from dlblas.kernels.apply_rotary_pos_emb import apply_rotary_pos_emb
 from dlblas.utils.device_utils import get_idle_device
 
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
 
 def _rotate_half(x):
     """Rotates half the hidden dims of the input."""
@@ -23,8 +44,10 @@ def torch_rotary_pos_emb(q_states, k_states, cached_cos, cached_sin, position_id
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    # device_ = torch.device(get_idle_device())
+    # torch.cuda.set_device(device_)
+    print(f"zmz DEVICE={DEVICE}")
+    device_ = DEVICE
     dtype_ = torch.float16
     b, s, h, d = 1, 256, 32, 128
     cached_cos = torch.randn((s, d), dtype=dtype_, device=device_)
@@ -34,6 +57,7 @@ def test():
     # position_ids_1d = torch.randint(0, s, (b * s,), device=device_)
     position_ids_1d = torch.arange(0, s, device=device_)
     q_embed, k_embed = torch_rotary_pos_emb(q_states, k_states, cached_cos, cached_sin, position_ids_1d)
+    print(f"zmz q_states.device: {q_states.device}, k_states.device: {k_states.device}, cached_cos.device: {cached_cos.device}, cached_sin.device: {cached_sin.device}")
     q_embed_tri, k_embed_tri = apply_rotary_pos_emb(q_states, k_states, cached_cos, cached_sin)
     print('max abs diff: ', torch.max(abs(q_embed - q_embed_tri)))
     print('max abs diff: ', torch.max(abs(k_embed - k_embed_tri)))

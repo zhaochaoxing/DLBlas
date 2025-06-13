@@ -11,6 +11,45 @@ from dlblas.utils.device_utils import get_idle_device, is_cuda, is_muxi
 
 MUXI_CUDA = is_muxi() or is_cuda()
 
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
+
+
+import time
+
+def cpu_do_bench(fn, warmup=25, rep=100):
+    # 预热
+    for _ in range(warmup):
+        fn()
+    
+    # 实际测量
+    start_time = time.perf_counter()
+    for _ in range(rep):
+        fn()
+    end_time = time.perf_counter()
+    
+    # 计算平均时间 (毫秒)
+    return (end_time - start_time) * 1000 / rep
+
+
 
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
@@ -129,7 +168,7 @@ def test():
                 sin.view(1, seq_len, dim),
                 2,
             )
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        ms = cpu_do_bench(fn, warmup=warmup, rep=rep)
         return ms
 
     bench_fn.run(show_plots=True, print_data=True)

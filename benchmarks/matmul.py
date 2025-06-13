@@ -9,6 +9,46 @@ import triton.language as tl
 from dlblas.utils import get_op
 
 
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
+
+
+import time
+
+def cpu_do_bench(fn, warmup=25, rep=100):
+    # 预热
+    for _ in range(warmup):
+        fn()
+    
+    # 实际测量
+    start_time = time.perf_counter()
+    for _ in range(rep):
+        fn()
+    end_time = time.perf_counter()
+    
+    # 计算平均时间 (毫秒)
+    return (end_time - start_time) * 1000 / rep
+
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', type=int, default=32)
@@ -20,13 +60,14 @@ def parse_args():
 
 
 def is_cuda():
-    return torch.cuda.is_available()
+    # return torch.cuda.is_available()
+    return False
 
 
 def main():
     args = parse_args()
     dtype = torch.float16
-    device = 'cuda'
+    device = 'cpu'
     a = torch.randn(
         (args.m, args.k),
         dtype=dtype,
@@ -87,20 +128,20 @@ def main():
     def benchmark(cnt, M, N, K, provider, fp8_inputs):
         warmup = 500
         rep = 500
-        a = torch.randn((M, K), device='cuda', dtype=torch.float16)
-        b = torch.randn((K, N), device='cuda', dtype=torch.float16)
+        a = torch.randn((M, K), device='cpu', dtype=torch.float16)
+        b = torch.randn((K, N), device='cpu', dtype=torch.float16)
         if TORCH_HAS_FP8 and fp8_inputs:
             a = a.to(torch.float8_e5m2)
             b = b.T
             b = b.to(torch.float8_e5m2)
         quantiles = [0.5, 0.2, 0.8]
         if provider == ref_lib.lower():
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b),
+            ms, min_ms, max_ms = cpu_do_bench(lambda: torch.matmul(a, b),
                                                          quantiles=quantiles,
                                                          warmup=warmup,
                                                          rep=rep)
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b),
+            ms, min_ms, max_ms = cpu_do_bench(lambda: matmul(a, b),
                                                          quantiles=quantiles,
                                                          warmup=warmup,
                                                          rep=rep)

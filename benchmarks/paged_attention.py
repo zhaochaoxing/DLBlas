@@ -10,6 +10,44 @@ import triton
 from dlblas.kernels.paged_attention import paged_attention_fwd
 
 
+import time
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
+
+
+def cpu_do_bench(fn, warmup=25, rep=100):
+    # 预热
+    for _ in range(warmup):
+        fn()
+    
+    # 实际测量
+    start_time = time.perf_counter()
+    for _ in range(rep):
+        fn()
+    end_time = time.perf_counter()
+    
+    # 计算平均时间 (毫秒)
+    return (end_time - start_time) * 1000 / rep
+
+
 def _conti_input(data, seq_lens):
     data = [x[:l] for x, l in zip(data, seq_lens)]
     data = torch.cat(data, dim=0)
@@ -23,9 +61,9 @@ def _make_bias(seq_lens, history_lens, neg_val):
     seq_ranges = [torch.arange(max_seq_len) for _ in seq_lens]
     for r, l in zip(seq_ranges, seq_lens):
         r[l:] = -max_full_len
-    seq_ranges = torch.stack(seq_ranges, dim=0).cuda()
+    seq_ranges = torch.stack(seq_ranges, dim=0).cpu()
     kv_ranges = [torch.arange(max_full_len) for _ in full_seq_lens]
-    kv_ranges = torch.stack(kv_ranges, 0).cuda()
+    kv_ranges = torch.stack(kv_ranges, 0).cpu()
     mask = kv_ranges[:, None, :] - seq_ranges[:, :, None] > history_lens[:, None, None]
     return mask.float() * neg_val
 
@@ -125,7 +163,7 @@ def _batched_q(seq_lens, num_heads_q, feat_dim, dtype):
     torch.manual_seed(123)
     batch_size = len(seq_lens)
     max_seq_len = seq_lens.max().item()
-    return torch.randn(batch_size, max_seq_len, num_heads_q, feat_dim, dtype=dtype, device='cuda')
+    return torch.randn(batch_size, max_seq_len, num_heads_q, feat_dim, dtype=dtype, device='cpu')
 
 
 def _batched_kv(seq_lens, history_lens, num_heads_k, feat_dim, feat_dim_v, dtype):
@@ -133,8 +171,8 @@ def _batched_kv(seq_lens, history_lens, num_heads_k, feat_dim, feat_dim_v, dtype
     batch_size = len(seq_lens)
     full_seq_lens = seq_lens + history_lens
     max_seq_len = full_seq_lens.max().item()
-    k = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim, dtype=dtype, device='cuda')
-    v = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim_v, dtype=dtype, device='cuda')
+    k = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim, dtype=dtype, device='cpu')
+    v = torch.rand(batch_size, max_seq_len, num_heads_k, feat_dim_v, dtype=dtype, device='cpu')
     return k, v
 
 
@@ -156,7 +194,7 @@ def _block_offsets(seq_lens, history_lens, block_size):
 
     print(new_offset)
 
-    return new_offset.cuda()
+    return new_offset.cpu()
 
 
 def _conti_kv(batched_kv, seq_lens, history_lens):
@@ -237,10 +275,10 @@ def test():
     feat_dim_v = 16
     num_heads_q = 4
     num_heads_k = 2
-    seq_lens = torch.tensor([128], device='cuda')
+    seq_lens = torch.tensor([128], device='cpu')
     start_loc = _start_loc(seq_lens)
     block_size = 16
-    history_lens = torch.tensor([128], device='cuda')
+    history_lens = torch.tensor([128], device='cpu')
     win_size = 32
 
     batched_q = _batched_q(seq_lens, num_heads_q, feat_dim, dtype)
@@ -296,7 +334,7 @@ def test():
         ))
 
     @triton.testing.perf_report(configs)
-    def bench_fn(op, provider, device='cuda'):
+    def bench_fn(op, provider, device='cpu'):
         warmup = 100
         rep = 200
 
@@ -316,7 +354,7 @@ def test():
         if 'pytorch' in provider:
             fn = lambda: _conti_gt(_gt(batched_q, batched_kv, mask), seq_lens)
 
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        ms = cpu_do_bench(fn, warmup=warmup, rep=rep)
         return ms
 
     bench_fn.run(show_plots=True, print_data=True)

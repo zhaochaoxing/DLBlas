@@ -66,8 +66,45 @@ def ref_selective_scan(u, delta, A, B, C, initial_state):
     return y.to(original_dtype), x
 
 
-device_ = torch.device(get_idle_device())
-torch.cuda.set_device(device_)
+import time
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
+
+
+def cpu_do_bench(fn, warmup=25, rep=100):
+    # 预热
+    for _ in range(warmup):
+        fn()
+    
+    # 实际测量
+    start_time = time.perf_counter()
+    for _ in range(rep):
+        fn()
+    end_time = time.perf_counter()
+    
+    # 计算平均时间 (毫秒)
+    return (end_time - start_time) * 1000 / rep
+
+device_ = DEVICE
+# torch.cuda.set_device(device_)
 
 
 def test():
@@ -76,14 +113,14 @@ def test():
     D = 512
     K = 16
     dtype = torch.float32
-    A = (-(torch.rand(D, K, dtype=dtype)).exp().cuda()).requires_grad_(True)
-    x = torch.randn(B, T, D, dtype=dtype).cuda().requires_grad_(True)
-    delta = torch.randn(B, T, D, dtype=dtype).sigmoid().cuda().requires_grad_(True)
-    B2 = torch.randn(B, T, K, dtype=dtype).cuda().requires_grad_(True)
-    C = torch.randn(B, T, K, dtype=dtype).cuda().requires_grad_(True)
-    D2 = torch.randn(D, dtype=dtype).cuda().requires_grad_(True)
+    A = (-(torch.rand(D, K, dtype=dtype)).exp().cpu()).requires_grad_(True)
+    x = torch.randn(B, T, D, dtype=dtype).cpu().requires_grad_(True)
+    delta = torch.randn(B, T, D, dtype=dtype).sigmoid().cpu().requires_grad_(True)
+    B2 = torch.randn(B, T, K, dtype=dtype).cpu().requires_grad_(True)
+    C = torch.randn(B, T, K, dtype=dtype).cpu().requires_grad_(True)
+    D2 = torch.randn(D, dtype=dtype).cpu().requires_grad_(True)
 
-    initial_state = torch.randn(B, D, K, dtype=dtype).cuda().requires_grad_(False)
+    initial_state = torch.randn(B, D, K, dtype=dtype).cpu().requires_grad_(False)
 
     tri, tri_final = SelectiveScan.apply(x, delta, A, B2, C, initial_state)
     do = torch.randn_like(tri)
@@ -142,24 +179,24 @@ def test():
         if 'triton' in provider:
             if 'fwd' == op:
                 fn = lambda: SelectiveScan.apply(x, delta, A, B2, C, initial_state)
-                ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+                ms = cpu_do_bench(fn, warmup=warmup, rep=rep)
             elif 'bwd' == op:
                 tri, tri_final = SelectiveScan.apply(x, delta, A, B2, C, initial_state)
                 do = torch.randn_like(tri)
                 bwd_fn = lambda: tri.backward(do, retain_graph=True)
-                ms = triton.testing.do_bench(bwd_fn, warmup=warmup, rep=rep)
+                ms = cpu_do_bench(bwd_fn, warmup=warmup, rep=rep)
             else:
                 raise Exception()
 
         if 'pytorch' in provider:
             if 'fwd' == op:
                 fn = lambda: ref_selective_scan(x, delta, A, B2, C, initial_state)
-                ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+                ms = cpu_do_bench(fn, warmup=warmup, rep=rep)
             elif 'bwd' == op:
                 tri, tri_final = ref_selective_scan(x, delta, A, B2, C, initial_state)
                 do = torch.randn_like(tri)
                 bwd_fn = lambda: tri.backward(do, retain_graph=True)
-                ms = triton.testing.do_bench(bwd_fn, warmup=warmup, rep=rep)
+                ms = cpu_do_bench(bwd_fn, warmup=warmup, rep=rep)
             else:
                 raise Exception()
         return ms

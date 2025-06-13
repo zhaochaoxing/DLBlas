@@ -19,7 +19,8 @@ def _block_offsets(num_blocks_per_input):
     batch_ids = torch.arange(batch_size)
     ret = torch.arange(max_num_blocks)
     ret = batch_ids[:, None] + ret[None, :] * batch_size
-    return ret.cuda()
+    # return ret.cuda()
+    return ret.cpu()
 
 
 def _gt(
@@ -100,12 +101,12 @@ def test():
     num_tokens = sum(seq_lens)
     num_blocks_per_input = [_div_up(kv_len, block_size) for kv_len in kv_lens]
     max_num_blocks = max(num_blocks_per_input)
-    q_seq_length = torch.tensor(seq_lens).cuda()
+    q_seq_length = torch.tensor(seq_lens).cpu()
     q_start_loc = q_seq_length.cumsum(0) - q_seq_length
-    kv_seq_length = torch.tensor(kv_lens).cuda()
-    k_states = torch.rand(num_tokens, num_heads, head_dim).cuda()
+    kv_seq_length = torch.tensor(kv_lens).cpu()
+    k_states = torch.rand(num_tokens, num_heads, head_dim).cpu()
     v_states = torch.rand_like(k_states)
-    k_caches = torch.full((batch_size * max_num_blocks, block_size, num_heads, head_dim), 0.0).cuda()
+    k_caches = torch.full((batch_size * max_num_blocks, block_size, num_heads, head_dim), 0.0).cpu()
     v_caches = torch.rand_like(k_caches)
     block_offsets = _block_offsets(num_blocks_per_input)
 
@@ -148,7 +149,7 @@ def test():
         ))
 
     @triton.testing.perf_report(configs)
-    def bench_fn(op, provider, device='cuda'):
+    def bench_fn(op, provider, device='cpu'):
         warmup = 100
         rep = 200
 

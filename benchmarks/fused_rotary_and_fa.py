@@ -111,8 +111,9 @@ def none_fused_rotary_and_fa(seq_len, heads, dim, query, key, value, cos, sin, p
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    # device_ = torch.device(get_idle_device())
+    # torch.cuda.set_device(device_)
+    device_ = DEVICE
     dtype = torch.float16
     if MUXI_CUDA:
         dtype = torch.float32

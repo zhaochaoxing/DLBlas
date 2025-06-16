@@ -22,6 +22,45 @@ else:
     device_dtype = tl.float16
 
 
+
+import time
+DEVICE = 'cpu'
+TEST_CPU = True
+def change_env():
+    global DEVICE
+    if TEST_CPU:
+        from triton.backends.triton_shared.driver import CPUDriver
+
+        def select_cpu_backend():
+            triton.runtime.driver.set_active(CPUDriver())
+
+        select_cpu_backend()
+        DEVICE = 'cpu'
+    else:
+        from dlblas.utils.device_utils import get_idle_device
+        DEVICE = torch.device(get_idle_device())
+        torch.cuda.set_device(DEVICE)
+
+    print(f"zmz debug device={triton.runtime.driver.active.get_current_target()}, DEVICE={DEVICE}")
+
+change_env()
+
+
+def cpu_do_bench(fn, warmup=25, rep=100):
+    # 预热
+    for _ in range(warmup):
+        fn()
+    
+    # 实际测量
+    start_time = time.perf_counter()
+    for _ in range(rep):
+        fn()
+    end_time = time.perf_counter()
+    
+    # 计算平均时间 (毫秒)
+    return (end_time - start_time) * 1000 / rep
+
+
 @triton.autotune(
     configs=[
         triton.Config({
@@ -215,14 +254,14 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
     assert d <= 128, 'FlashAttention only support head dimensions up to 128'
     assert q.dtype == k.dtype == v.dtype, 'All tensors must have the same type'
     assert q.dtype in [torch.float16, torch.bfloat16, torch.float32], 'Only support fp16, bf16 and fp32'
-    assert q.is_cuda and k.is_cuda and v.is_cuda
+    # assert q.is_cuda and k.is_cuda and v.is_cuda
     softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
 
     has_bias = bias is not None
     bias_type = 'none'
     if has_bias:
         assert bias.dtype in [q.dtype, torch.float]
-        assert bias.is_cuda
+        # assert bias.is_cuda
         assert bias.dim() == 4
         if bias.stride(-1) != 1:
             bias = bias.contiguous()
@@ -245,6 +284,7 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
     BLOCK = 128
     num_warps = 4 if d <= 64 else 8
     grid = lambda META: (batch * nheads, triton.cdiv(seqlen_q, META['BLOCK_M']))
+    config = triton.Config({'BLOCK_M': 32, 'BLOCK_N': 64}, num_warps=1)
 
     _fwd_kernel[grid](
         q,
@@ -281,6 +321,7 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
         # BLOCK_N=BLOCK,
         # num_warps=num_warps,
         # num_stages=1,
+        config=config,
     )
     # print(f"_fwd_kernel.best_config ", _fwd_kernel.best_config, flush = True)
     return o, lse, softmax_scale  # softmax_scale could have been updated
@@ -300,7 +341,7 @@ def call(q, k, v):
 
 def bench_fn(q, k, v):
     fn = lambda: call(q, k, v)
-    ms = triton.testing.do_bench(fn, warmup=100, rep=100)
+    ms = cpu_do_bench(fn, warmup=100, rep=100)
     return ms
 
 

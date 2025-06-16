@@ -50,8 +50,9 @@ def cpu_do_bench(fn, warmup=25, rep=100):
 
 
 def test():
-    device_ = torch.device(get_idle_device())
-    torch.cuda.set_device(device_)
+    # device_ = torch.device(get_idle_device())
+    # torch.cuda.set_device(device_)
+    device_ = torch.device(DEVICE)
     dtype = torch.float16
     if MUXI_CUDA:
         dtype = torch.float32
